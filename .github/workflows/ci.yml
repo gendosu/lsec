@@ -56,9 +56,5 @@ jobs:
 
       - run: pnpm build:bin
 
-      - name: Smoke test
-        run: |
-          export LOCAL_SECRET_CONFIG_DIR="$RUNNER_TEMP/lsec-smoke"
-          printf 'smoke-value' | ./bin/lsec set smoke --stdin
-          test "$(./bin/lsec get smoke)" = "smoke-value"
-          MY_SECRET="lsec://global/smoke" ./bin/lsec run -- sh -c 'test "$MY_SECRET" = "smoke-value"'
+      - name: Run e2e suite against the binary
+        run: LSEC_E2E_CLI="$PWD/bin/lsec" pnpm test:e2e

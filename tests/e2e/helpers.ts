@@ -16,6 +16,13 @@ import { spawn } from 'node:child_process';
 
 const CLI_PATH = path.resolve(path.dirname(new URL(import.meta.url).pathname), '../../dist/cli.js');
 
+/**
+ * When set, e2e tests spawn this executable directly (no node interpreter)
+ * instead of `node dist/cli.js` — used to run the same suite against the
+ * bun-compiled single binary (e.g. `LSEC_E2E_CLI=$PWD/bin/lsec pnpm test:e2e`).
+ */
+const CLI_OVERRIDE = process.env.LSEC_E2E_CLI;
+
 export interface RunResult {
   stdout: string;
   stderr: string;
@@ -52,12 +59,20 @@ export function runCli(
   extraEnv?: Record<string, string>
 ): Promise<RunResult> {
   return new Promise((resolve, reject) => {
-    if (!fs.existsSync(CLI_PATH)) {
-      reject(new Error(`${CLI_PATH} does not exist. Run "pnpm build" before running e2e tests.`));
+    const execPath = CLI_OVERRIDE ?? process.execPath;
+    const execArgs = CLI_OVERRIDE ? args : [CLI_PATH, ...args];
+    if (!fs.existsSync(CLI_OVERRIDE ?? CLI_PATH)) {
+      reject(
+        new Error(
+          CLI_OVERRIDE
+            ? `LSEC_E2E_CLI=${CLI_OVERRIDE} does not exist. Run "pnpm build:bin" (or fix the path) first.`
+            : `${CLI_PATH} does not exist. Run "pnpm build" before running e2e tests.`
+        )
+      );
       return;
     }
 
-    const child = spawn(process.execPath, [CLI_PATH, ...args], {
+    const child = spawn(execPath, execArgs, {
       env: { ...process.env, LOCAL_SECRET_CONFIG_DIR: configDir, ...extraEnv },
     });
 

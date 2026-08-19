@@ -39,12 +39,8 @@ jobs:
             bun build --compile --target="bun-${target}" src/cli.ts --outfile "release/lsec-${target}"
           done
 
-      - name: Smoke test (linux-x64)
-        run: |
-          export LOCAL_SECRET_CONFIG_DIR="$RUNNER_TEMP/lsec-smoke"
-          printf 'smoke-value' | ./release/lsec-linux-x64 set smoke --stdin
-          test "$(./release/lsec-linux-x64 get smoke)" = "smoke-value"
-          MY_SECRET="lsec://global/smoke" ./release/lsec-linux-x64 run -- sh -c 'test "$MY_SECRET" = "smoke-value"'
+      - name: Run e2e suite against the linux-x64 binary
+        run: LSEC_E2E_CLI="$PWD/release/lsec-linux-x64" pnpm test:e2e
 
       - name: Checksums
         run: |

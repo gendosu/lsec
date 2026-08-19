@@ -49,8 +49,6 @@ chmod +x ~/bin/lsec
 xattr -d com.apple.quarantine <path>
 ```
 
-以前は `pnpm add -g` によるグローバルインストールを案内していましたが、node のバージョン切り替え（nodenv / mise など）の影響で壊れやすいため非推奨です。上記のバイナリ配布を使ってください。
-
 ### ソースからビルド
 
 `bun` が必要です（単一バイナリのビルドに使用します）。

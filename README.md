@@ -49,8 +49,6 @@ The distributed binaries are unsigned. If you download one through a browser, ma
 xattr -d com.apple.quarantine <path>
 ```
 
-We previously recommended a global install via `pnpm add -g`, but that approach is fragile under Node version switchers (nodenv / mise, etc.) and is now deprecated. Use the binary distribution above instead.
-
 ### Building from source
 
 `bun` is required (used to build the single binary).

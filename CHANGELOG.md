@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- bun による単一バイナリビルド `pnpm build:bin`（`bin/lsec` を生成）
+- GitHub Actions によるリリースワークフロー。`v*` タグの push で darwin-arm64 / darwin-x64 / linux-x64 / linux-arm64 の4バイナリと `SHA256SUMS` をビルドし、GitHub Releases に添付
+- CI にバイナリ検証ジョブを追加（bun でビルドした `bin/lsec` に対して e2e スイート全体を実行。リリースワークフローでも linux-x64 バイナリに対して実行）。e2e テストは `LSEC_E2E_CLI` 環境変数で対象バイナリを差し替え可能
 - `deleteNamespace` / CLI `delete-namespace` による namespace 単位の一括削除コマンド
 - `tryGetSecret` / `hasSecret` / `listNamespaces` のシュガー関数
 - CLI `list --refs`: key を `lsec://<namespace>/<key>` 参照形式で1行1件出力するオプション（`lsec run` の環境変数値にそのままコピペできる。`--ns` / `--all` と併用可）。参照として表現できない key（`/`・空白を含む名前、`global` というリテラル名の namespace）は stdout から除外して stderr に警告する。逆変換関数 `formatSecretRef` をライブラリ API としても公開
@@ -16,6 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- パッケージ名を `local-secret` から `lsec` にリネーム（リポジトリも `github.com/gendosu/lsec` へ移動。保存先 `~/.config/local-secret` と環境変数 `LOCAL_SECRET_CONFIG_DIR` は互換性のため変更なし）
 - CLI `get` コマンドの出力に、TTY 実行時は末尾改行を付与するよう変更
 - CLI の bin 名（コマンド名）を `local-secret` から `lsec` に変更し、旧コマンド名は廃止（npm パッケージ名・保存ディレクトリ・`LOCAL_SECRET_CONFIG_DIR` 環境変数は変更なし）
 
@@ -38,5 +42,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - git 経由インストール時に `dist` がビルドされていなかった問題を、`prepare` スクリプト追加により修正
 
-[Unreleased]: https://github.com/gendosu/local-secret/compare/v0.1.0...HEAD
-[0.1.0]: https://github.com/gendosu/local-secret/releases/tag/v0.1.0
+[Unreleased]: https://github.com/gendosu/lsec/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/gendosu/lsec/releases/tag/v0.1.0

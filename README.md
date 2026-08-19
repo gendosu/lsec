@@ -1,6 +1,6 @@
-# local-secret
+# lsec
 
-ローカルマシン上にシークレット（API キー・トークン・パスワードなど）を暗号化して保存する、Node.js 用のライブラリ + CLI です。
+lsec は、ローカルマシン上にシークレット（API キー・トークン・パスワードなど）を暗号化して保存する、単一バイナリとして配布される CLI + Node.js 用ライブラリです。CLI は単一バイナリのため実行時に Node.js を必要とせず、nodenv / mise などのバージョン切り替えの影響を受けません。
 
 ## プロジェクト概要
 
@@ -16,30 +16,66 @@
 
 値は文字列のみを扱います（構造化 JSON 値やリモート同期はスコープ外です）。
 
-対応 Node.js バージョン: 20 以上。
+ライブラリとして使う場合は Node.js 20 以上が必要です。バイナリ版 CLI は Node.js 不要です。
 
 ## インストール方法
+
+### CLI（推奨: バイナリ）
+
+GitHub Releases からビルド済みのバイナリをダウンロードして使う方法を推奨します。実行時に Node.js は不要です。
+
+```bash
+# macOS (Apple Silicon)
+mkdir -p ~/bin
+curl -fsSL -o ~/bin/lsec https://github.com/gendosu/lsec/releases/latest/download/lsec-darwin-arm64
+chmod +x ~/bin/lsec
+```
+
+`~/bin` が PATH に含まれていない場合は、シェルの設定ファイルで PATH に追加してください。
+
+| アセット | 対象プラットフォーム |
+| --- | --- |
+| `lsec-darwin-arm64` | macOS（Apple Silicon） |
+| `lsec-darwin-x64` | macOS（Intel） |
+| `lsec-linux-x64` | Linux（x86_64） |
+| `lsec-linux-arm64` | Linux（arm64） |
+| `SHA256SUMS` | 上記4バイナリの SHA256 チェックサム一覧 |
+
+配布しているバイナリは未署名です。ブラウザ経由でダウンロードした場合、macOS Gatekeeper にブロックされ実行できないことがあります。その場合は quarantine 属性を解除してください（`curl` でのダウンロードでは通常この属性は付与されないため発生しません）。
+
+```bash
+xattr -d com.apple.quarantine <path>
+```
+
+以前は `pnpm add -g` によるグローバルインストールを案内していましたが、node のバージョン切り替え（nodenv / mise など）の影響で壊れやすいため非推奨です。上記のバイナリ配布を使ってください。
+
+### ソースからビルド
+
+`bun` が必要です（単一バイナリのビルドに使用します）。
+
+```bash
+pnpm install
+pnpm build:bin
+```
+
+`bin/lsec` に単一バイナリが生成されます。
+
+### ライブラリとして使う場合
 
 npm への公開は準備済みですが、当面は git 経由でインストールしてください。
 
 ```bash
 # pnpm（SSH 経由）
-pnpm add git+ssh://git@github.com/gendosu/local-secret.git
+pnpm add git+ssh://git@github.com/gendosu/lsec.git
 
 # HTTPS 経由でクローンする場合
-pnpm add git+https://github.com/gendosu/local-secret.git
+pnpm add git+https://github.com/gendosu/lsec.git
 ```
 
 npm 公開後は次のようにインストールできます。
 
 ```bash
-pnpm add local-secret
-```
-
-CLI をグローバルに使いたい場合は `-g` を付けてインストールしてください（`lsec` コマンドが使えるようになります）。
-
-```bash
-pnpm add -g git+ssh://git@github.com/gendosu/local-secret.git
+pnpm add lsec
 ```
 
 ## ライブラリ API の使い方
@@ -47,7 +83,7 @@ pnpm add -g git+ssh://git@github.com/gendosu/local-secret.git
 ### SecretStore クラス
 
 ```ts
-import { SecretStore } from 'local-secret';
+import { SecretStore } from 'lsec';
 
 // 既定: ~/.config/local-secret を使用
 const store = new SecretStore();
@@ -91,7 +127,7 @@ store.rotateMasterKey(); // => 3
 `SecretNotFoundError` / `CryptoError` / `StoreError` もライブラリからエクスポートされているので、必要に応じて捕捉できます。
 
 ```ts
-import { getSecret, SecretNotFoundError } from 'local-secret';
+import { getSecret, SecretNotFoundError } from 'lsec';
 
 try {
   getSecret('missing_key');
@@ -117,7 +153,7 @@ import {
   listNamespaces,
   deleteNamespace,
   rotateMasterKey,
-} from 'local-secret';
+} from 'lsec';
 
 setSecret('github_token', 'ghp_xxxxx'); // global
 setSecret('password', 'p@ss', { namespace: 'imap' });
@@ -140,7 +176,7 @@ rotateMasterKey(); // => 3（再暗号化した件数）
 CLI の `run` コマンド（後述）が使っている、参照解決の純ロジックもライブラリ API として公開されています。CLI を経由せず、自前のツールから同じ解決規則を使いたい場合に利用できます。
 
 ```ts
-import { isSecretRef, parseSecretRef, parseEnvFile, resolveEnv, SecretStore } from 'local-secret';
+import { isSecretRef, parseSecretRef, parseEnvFile, resolveEnv, SecretStore } from 'lsec';
 
 isSecretRef('lsec://work/token'); // => true
 parseSecretRef('lsec://work/token'); // => { namespace: 'work', key: 'token' }
@@ -236,7 +272,7 @@ lsec run --dotenv .env -- npm run dev
 
 マスター鍵（`master.key`）は暗号文（`secrets.json`）の隣、同一ディレクトリに保存されます。これは「真の暗号化」ではなく **事故時の露出防止(秘密の二分割＋難読化)** であることを明示しておきます。
 
-| 脅威 | 平文保存の場合 | local-secret（本ライブラリ）の場合 |
+| 脅威 | 平文保存の場合 | lsec（本ライブラリ）の場合 |
 | --- | --- | --- |
 | A: `secrets.json` だけが事故で漏れる（誤 `git add` / バックアップ同期 / 貼り付け） | 露出 | 守れる（暗号文のみ。鍵は別ファイル `master.key`） |
 | B: 同一ユーザ権限の攻撃者が `~/.config/local-secret` を丸ごと読む | 露出 | 露出（鍵と暗号文が隣接しており差は無い） |
@@ -245,6 +281,8 @@ lsec run --dotenv .env -- npm run dev
 個人用のローカル CLI / ライブラリとして、脅威 A（事故漏えい）の防止に価値を置いた設計です。**脅威 B・C（同一ユーザ権限の攻撃者や root）には防御力を持ちません。** より強い保護が必要な場合は、パスフレーズ由来鍵や OS キーチェーン連携などを別途検討してください（本ライブラリの対象外です）。
 
 ## ストレージ仕様
+
+パッケージは `lsec` にリネームされましたが、保存先ディレクトリ名は後方互換のため `local-secret` のまま変更していません。
 
 保存先は `os.homedir()` 基準の `~/.config/local-secret/` に固定です（`appName` を指定した場合は `~/.config/<appName>/`）。
 

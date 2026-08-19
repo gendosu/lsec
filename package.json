@@ -1,0 +1,60 @@
+{
+  "name": "local-secret",
+  "version": "0.1.0",
+  "description": "Local secret store library/CLI with encryption at rest",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "bin": {
+    "lsec": "dist/cli.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist/",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "prepare": "npm run build",
+    "test": "pnpm test:unit && pnpm test:e2e",
+    "test:unit": "vitest run",
+    "test:e2e": "vitest run --config vitest.e2e.config.ts"
+  },
+  "keywords": [
+    "secret",
+    "credential",
+    "encryption",
+    "cli",
+    "aes-gcm"
+  ],
+  "author": "gendosu",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/gendosu/local-secret.git"
+  },
+  "bugs": {
+    "url": "https://github.com/gendosu/local-secret/issues"
+  },
+  "homepage": "https://github.com/gendosu/local-secret#readme",
+  "engines": {
+    "node": ">=20"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "packageManager": "pnpm@10.33.4",
+  "dependencies": {
+    "commander": "^14.0.3"
+  },
+  "devDependencies": {
+    "@types/node": "^25.9.1",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.7"
+  }
+}

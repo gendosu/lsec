@@ -1,0 +1,9 @@
+{
+  "name": "local-secret",
+  "image": "mcr.microsoft.com/devcontainers/typescript-node:22",
+  "postCreateCommand": "bash .devcontainer/postCreate.sh",
+  "mounts": [
+    "source=local-secret-home,target=/home/node,type=volume",
+    "source=${localEnv:HOME}/.ssh,target=/home/node/.ssh,type=bind,readonly"
+  ]
+}

@@ -1,0 +1,7 @@
+node_modules/
+dist/
+.pnpm-store
+.claude/settings.local.json
+.agkan
+.agkan.yml
+tmp

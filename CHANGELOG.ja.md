@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-08-19
+
 ### Added
 
 - bun による単一バイナリビルド `pnpm build:bin`（`bin/lsec` を生成）
@@ -44,5 +46,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - git 経由インストール時に `dist` がビルドされていなかった問題を、`prepare` スクリプト追加により修正
 
-[Unreleased]: https://github.com/gendosu/lsec/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/gendosu/lsec/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/gendosu/lsec/releases/tag/v0.2.0
 [0.1.0]: https://github.com/gendosu/lsec/releases/tag/v0.1.0

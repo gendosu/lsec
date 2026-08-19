@@ -1,5 +1,5 @@
 {
-  "name": "local-secret",
+  "name": "lsec",
   "version": "0.1.0",
   "description": "Local secret store library/CLI with encryption at rest",
   "type": "module",
@@ -36,12 +36,12 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/gendosu/local-secret.git"
+    "url": "git+https://github.com/gendosu/lsec.git"
   },
   "bugs": {
-    "url": "https://github.com/gendosu/local-secret/issues"
+    "url": "https://github.com/gendosu/lsec/issues"
   },
-  "homepage": "https://github.com/gendosu/local-secret#readme",
+  "homepage": "https://github.com/gendosu/lsec#readme",
   "engines": {
     "node": ">=20"
   },

@@ -1,0 +1,60 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+
+      - run: pnpm install --frozen-lockfile
+
+      - run: pnpm build
+
+      - run: pnpm test:unit
+
+      - run: pnpm test:e2e
+
+      - name: Build binaries
+        run: |
+          mkdir -p release
+          for target in darwin-arm64 darwin-x64 linux-x64 linux-arm64; do
+            bun build --compile --target="bun-${target}" src/cli.ts --outfile "release/lsec-${target}"
+          done
+
+      - name: Smoke test (linux-x64)
+        run: |
+          export LOCAL_SECRET_CONFIG_DIR="$RUNNER_TEMP/lsec-smoke"
+          printf 'smoke-value' | ./release/lsec-linux-x64 set smoke --stdin
+          test "$(./release/lsec-linux-x64 get smoke)" = "smoke-value"
+          MY_SECRET="lsec://global/smoke" ./release/lsec-linux-x64 run -- sh -c 'test "$MY_SECRET" = "smoke-value"'
+
+      - name: Checksums
+        run: |
+          cd release
+          sha256sum lsec-* > SHA256SUMS
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" release/* \
+            --title "$GITHUB_REF_NAME" \
+            --generate-notes

@@ -20,6 +20,7 @@
   ],
   "scripts": {
     "build": "tsc",
+    "build:bin": "bun build --compile src/cli.ts --outfile bin/lsec",
     "prepare": "npm run build",
     "test": "pnpm test:unit && pnpm test:e2e",
     "test:unit": "vitest run",

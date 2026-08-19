@@ -1,5 +1,6 @@
 node_modules/
 dist/
+bin/
 .pnpm-store
 .claude/settings.local.json
 .agkan

@@ -22,10 +22,17 @@ export function promptHiddenPassword(
   return new Promise((resolve, reject) => {
     const rl = readline.createInterface({ input, output, terminal: true });
     const rlAny = rl as unknown as { _writeToOutput: (s: string) => void };
-    // Suppress echo of typed characters; the question is written directly below.
-    rlAny._writeToOutput = (_str: string) => { /* no-op: prevent echoing typed chars */ };
-    output.write(question);
-    rl.question('', (answer) => {
+    // readline's line refreshes erase the prompt line (cursor-to-column-0 +
+    // clear-screen-down written straight to `output`) before passing
+    // `question + <typed so far>` through here — so the question must be
+    // re-emitted from inside this hook, not written directly to `output`
+    // beforehand (it would be erased by the very first refresh, leaving the
+    // user staring at a blank line). Individual typed characters also arrive
+    // here and are swallowed, which is what keeps the value hidden.
+    rlAny._writeToOutput = (str: string) => {
+      if (str.startsWith(question)) output.write(question);
+    };
+    rl.question(question, (answer) => {
       rl.close();
       output.write('\n');
       resolve(answer);

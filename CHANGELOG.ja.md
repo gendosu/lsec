@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-08-20
+
+### 変更
+
+- **破壊的変更**: CLI `set` のシークレット値入力を2回（確認再入力あり）から1回に変更。確認再入力とその不一致エラーを廃止した。また、入力が画面に表示されなくても入力待ちであることが分かるよう、プロンプト文言に「(input is hidden)」のヒントを追加
+
+### 修正
+
+- CLI `set` が質問文の消えた真っ白な行のまま隠し入力を待つ問題を修正。readline の初回行リフレッシュが `promptHiddenPassword` の書き込んだ質問文を消していたため、質問を `rl.question()` 経由で出力し、`_writeToOutput` フックから質問文のみ再描画するようにした（入力文字は非表示のまま）
+
 ## [0.2.1] - 2026-08-20
 
 ### 追加
@@ -56,6 +66,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - git 経由インストール時に `dist` がビルドされていなかった問題を、`prepare` スクリプト追加により修正
 
-[Unreleased]: https://github.com/gendosu/lsec/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/gendosu/lsec/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/gendosu/lsec/releases/tag/v0.3.0
+[0.2.1]: https://github.com/gendosu/lsec/releases/tag/v0.2.1
 [0.2.0]: https://github.com/gendosu/lsec/releases/tag/v0.2.0
 [0.1.0]: https://github.com/gendosu/lsec/releases/tag/v0.1.0

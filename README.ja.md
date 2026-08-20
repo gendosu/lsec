@@ -26,6 +26,21 @@ lsec は、ローカルマシン上にシークレット（API キー・トー�
 
 GitHub Releases からビルド済みのバイナリをダウンロードして使う方法を推奨します。実行時に Node.js は不要です。
 
+#### GitHub CLI でダウンロード（推奨）
+
+このリポジトリにアクセスできるアカウントで認証済みの [GitHub CLI](https://cli.github.com/)（`gh auth login`）が必要です。ブラウザ経由のダウンロードと違い、`gh` は quarantine 属性を付与しないため、macOS Gatekeeper にブロックされずそのまま実行できます。
+
+```bash
+# macOS (Apple Silicon)
+mkdir -p ~/bin
+gh release download --repo gendosu/lsec --pattern lsec-darwin-arm64 --output ~/bin/lsec --clobber
+chmod +x ~/bin/lsec
+```
+
+#### curl でダウンロード
+
+リポジトリ（およびそのリリース）が公開されている場合のみ利用できます。
+
 ```bash
 # macOS (Apple Silicon)
 mkdir -p ~/bin

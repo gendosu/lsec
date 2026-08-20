@@ -26,6 +26,21 @@ Using it as a library requires Node.js 20 or later. The binary CLI does not requ
 
 We recommend downloading a prebuilt binary from GitHub Releases. Node.js is not required at runtime.
 
+#### With the GitHub CLI (recommended)
+
+Requires the [GitHub CLI](https://cli.github.com/) authenticated with an account that can access this repository (`gh auth login`). Unlike browser downloads, `gh` does not set the quarantine attribute, so macOS Gatekeeper does not block the downloaded binary.
+
+```bash
+# macOS (Apple Silicon)
+mkdir -p ~/bin
+gh release download --repo gendosu/lsec --pattern lsec-darwin-arm64 --output ~/bin/lsec --clobber
+chmod +x ~/bin/lsec
+```
+
+#### With curl
+
+Available only while the repository (and its releases) is publicly accessible.
+
 ```bash
 # macOS (Apple Silicon)
 mkdir -p ~/bin

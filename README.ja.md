@@ -93,6 +93,81 @@ npm 公開後は次のようにインストールできます。
 pnpm add lsec
 ```
 
+## CLI の使い方
+
+```
+lsec set <key> [--ns <namespace>] [--stdin]
+lsec get <key> [--ns <namespace>]
+lsec has <key> [--ns <namespace>]
+lsec list [--ns <namespace>] [--all] [--refs]
+lsec delete <key> [--ns <namespace>]
+lsec namespaces
+lsec delete-namespace <namespace> [--yes]
+lsec rotate-key [--yes]
+lsec run [--dotenv <path>] -- <command> [args...]
+```
+
+```bash
+# 値を設定（対話プロンプトで非表示入力・確認のため2回入力）
+lsec set github_token
+
+# パイプ入力で設定（スクリプト向け。末尾の改行1個は自動で除去される）
+echo -n "ghp_xxxxx" | lsec set github_token --stdin
+
+# namespace を指定して設定
+lsec set password --ns imap --stdin <<< "p@ss"
+
+# 取得（非TTY時は改行なしで stdout に出力するので $(...) で使える。TTY（ターミナル直接実行）時は末尾に改行が付く）
+lsec get github_token
+TOKEN=$(lsec get github_token)
+
+# namespace を指定して取得
+lsec get password --ns imap
+
+# 存在確認（値は出力しない。登録済みなら exit 0、未登録なら exit 1）
+lsec has github_token && echo "registered"
+lsec has password --ns imap
+
+# 一覧表示（--ns 省略時は global、--all は全 namespace）
+lsec list
+lsec list --ns imap
+lsec list --all
+
+# --refs は key を lsec://<namespace>/<key> 参照形式で1行1件出力する
+# （lsec run の環境変数値にそのままコピペできる）
+lsec list --all --refs
+# => lsec://global/github_token
+#    lsec://imap/password
+
+# 削除（未登録の key を指定しても冪等に成功する）
+lsec delete github_token
+
+# 使用済みの namespace 一覧
+lsec namespaces
+
+# namespace ごと削除（TTY では対象 key 件数を表示して y/N 確認。--yes で確認をスキップ）
+lsec delete-namespace imap
+lsec delete-namespace imap --yes
+
+# 非TTY（パイプ・スクリプト実行）では --yes が必須。無いとハングせずエラーで終了する
+lsec delete-namespace imap --yes < /dev/null
+
+# master.key をローテーション（新しい鍵を生成し、global/全 namespace の値を再暗号化して置き換える）
+# TTY では確認プロンプトを表示。--yes で確認をスキップし、非TTY では --yes が必須
+lsec rotate-key
+lsec rotate-key --yes
+
+# シークレットを、指定したコマンド実行中だけ環境変数として注入する（1Password CLI の `op run` 相当）
+# "--" より前が lsec run 自身のオプション、"--" より後が実行したいコマンドと、そのコマンド自身の引数
+GITHUB_TOKEN="lsec://global/github_token" lsec run -- gh api user
+GITHUB_TOKEN="lsec://global/github_token" lsec run -- npm run dev
+
+# --dotenv を使う場合（ファイル内の値が lsec://... 参照ならそれを解決し、そうでなければリテラルな値としてそのまま渡す）
+lsec run --dotenv .env -- npm run dev
+```
+
+シェル履歴に値が残る `--value <v>` のようなオプションは提供していません。値は対話プロンプト（非表示）か `--stdin` のいずれかで渡してください。未登録の key を `get` した場合など、エラー時は stderr にメッセージを出力し非ゼロの終了コードで終了します。
+
 ## ライブラリ API の使い方
 
 ### SecretStore クラス
@@ -188,7 +263,7 @@ rotateMasterKey(); // => 3（再暗号化した件数）
 
 ### `lsec run` の解決ロジック（ライブラリ API）
 
-CLI の `run` コマンド（後述）が使っている、参照解決の純ロジックもライブラリ API として公開されています。CLI を経由せず、自前のツールから同じ解決規則を使いたい場合に利用できます。
+CLI の `run` コマンド（前述）が使っている、参照解決の純ロジックもライブラリ API として公開されています。CLI を経由せず、自前のツールから同じ解決規則を使いたい場合に利用できます。
 
 ```ts
 import { isSecretRef, parseSecretRef, parseEnvFile, resolveEnv, SecretStore } from 'lsec';
@@ -207,81 +282,6 @@ const env = resolveEnv({
   resolveSecret: (ref) => store.get(ref.key, { namespace: ref.namespace }),
 });
 ```
-
-## CLI の使い方
-
-```
-lsec set <key> [--ns <namespace>] [--stdin]
-lsec get <key> [--ns <namespace>]
-lsec has <key> [--ns <namespace>]
-lsec list [--ns <namespace>] [--all] [--refs]
-lsec delete <key> [--ns <namespace>]
-lsec namespaces
-lsec delete-namespace <namespace> [--yes]
-lsec rotate-key [--yes]
-lsec run [--dotenv <path>] -- <command> [args...]
-```
-
-```bash
-# 値を設定（対話プロンプトで非表示入力・確認のため2回入力）
-lsec set github_token
-
-# パイプ入力で設定（スクリプト向け。末尾の改行1個は自動で除去される）
-echo -n "ghp_xxxxx" | lsec set github_token --stdin
-
-# namespace を指定して設定
-lsec set password --ns imap --stdin <<< "p@ss"
-
-# 取得（非TTY時は改行なしで stdout に出力するので $(...) で使える。TTY（ターミナル直接実行）時は末尾に改行が付く）
-lsec get github_token
-TOKEN=$(lsec get github_token)
-
-# namespace を指定して取得
-lsec get password --ns imap
-
-# 存在確認（値は出力しない。登録済みなら exit 0、未登録なら exit 1）
-lsec has github_token && echo "registered"
-lsec has password --ns imap
-
-# 一覧表示（--ns 省略時は global、--all は全 namespace）
-lsec list
-lsec list --ns imap
-lsec list --all
-
-# --refs は key を lsec://<namespace>/<key> 参照形式で1行1件出力する
-# （lsec run の環境変数値にそのままコピペできる）
-lsec list --all --refs
-# => lsec://global/github_token
-#    lsec://imap/password
-
-# 削除（未登録の key を指定しても冪等に成功する）
-lsec delete github_token
-
-# 使用済みの namespace 一覧
-lsec namespaces
-
-# namespace ごと削除（TTY では対象 key 件数を表示して y/N 確認。--yes で確認をスキップ）
-lsec delete-namespace imap
-lsec delete-namespace imap --yes
-
-# 非TTY（パイプ・スクリプト実行）では --yes が必須。無いとハングせずエラーで終了する
-lsec delete-namespace imap --yes < /dev/null
-
-# master.key をローテーション（新しい鍵を生成し、global/全 namespace の値を再暗号化して置き換える）
-# TTY では確認プロンプトを表示。--yes で確認をスキップし、非TTY では --yes が必須
-lsec rotate-key
-lsec rotate-key --yes
-
-# シークレットを、指定したコマンド実行中だけ環境変数として注入する（1Password CLI の `op run` 相当）
-# "--" より前が lsec run 自身のオプション、"--" より後が実行したいコマンドと、そのコマンド自身の引数
-GITHUB_TOKEN="lsec://global/github_token" lsec run -- gh api user
-GITHUB_TOKEN="lsec://global/github_token" lsec run -- npm run dev
-
-# --dotenv を使う場合（ファイル内の値が lsec://... 参照ならそれを解決し、そうでなければリテラルな値としてそのまま渡す）
-lsec run --dotenv .env -- npm run dev
-```
-
-シェル履歴に値が残る `--value <v>` のようなオプションは提供していません。値は対話プロンプト（非表示）か `--stdin` のいずれかで渡してください。未登録の key を `get` した場合など、エラー時は stderr にメッセージを出力し非ゼロの終了コードで終了します。
 
 ## 脅威モデルの注意書き
 

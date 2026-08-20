@@ -93,6 +93,81 @@ Once published to npm, you'll be able to install it like this:
 pnpm add lsec
 ```
 
+## CLI Usage
+
+```
+lsec set <key> [--ns <namespace>] [--stdin]
+lsec get <key> [--ns <namespace>]
+lsec has <key> [--ns <namespace>]
+lsec list [--ns <namespace>] [--all] [--refs]
+lsec delete <key> [--ns <namespace>]
+lsec namespaces
+lsec delete-namespace <namespace> [--yes]
+lsec rotate-key [--yes]
+lsec run [--dotenv <path>] -- <command> [args...]
+```
+
+```bash
+# Set a value (hidden input via interactive prompt, entered twice for confirmation)
+lsec set github_token
+
+# Set via piped input (for scripts; a single trailing newline is stripped automatically)
+echo -n "ghp_xxxxx" | lsec set github_token --stdin
+
+# Set with a namespace
+lsec set password --ns imap --stdin <<< "p@ss"
+
+# Get (in non-TTY mode, prints to stdout with no trailing newline, so it works with $(...). In TTY mode (run directly in a terminal), a trailing newline is appended)
+lsec get github_token
+TOKEN=$(lsec get github_token)
+
+# Get with a namespace
+lsec get password --ns imap
+
+# Check existence (doesn't print the value; exits 0 if registered, 1 if not)
+lsec has github_token && echo "registered"
+lsec has password --ns imap
+
+# List (global if --ns is omitted; --all lists every namespace)
+lsec list
+lsec list --ns imap
+lsec list --all
+
+# --refs prints each key as an lsec://<namespace>/<key> reference, one per line
+# (can be pasted directly as an environment variable value for lsec run)
+lsec list --all --refs
+# => lsec://global/github_token
+#    lsec://imap/password
+
+# Delete (idempotent; succeeds even if the key isn't registered)
+lsec delete github_token
+
+# List namespaces in use
+lsec namespaces
+
+# Delete an entire namespace (in TTY mode, shows the number of affected keys and asks y/N; --yes skips the prompt)
+lsec delete-namespace imap
+lsec delete-namespace imap --yes
+
+# In non-TTY mode (piped/script execution), --yes is required; without it, the command exits with an error instead of hanging
+lsec delete-namespace imap --yes < /dev/null
+
+# Rotate master.key (generates a new key and re-encrypts all values across global and every namespace)
+# Shows a confirmation prompt in TTY mode; --yes skips it, and --yes is required in non-TTY mode
+lsec rotate-key
+lsec rotate-key --yes
+
+# Inject a secret as an environment variable only for the duration of the specified command (equivalent to the 1Password CLI's `op run`)
+# Everything before "--" is an option for lsec run itself; everything after "--" is the command to run along with its own arguments
+GITHUB_TOKEN="lsec://global/github_token" lsec run -- gh api user
+GITHUB_TOKEN="lsec://global/github_token" lsec run -- npm run dev
+
+# Using --dotenv (values in the file that are lsec://... references are resolved; anything else is passed through as a literal value)
+lsec run --dotenv .env -- npm run dev
+```
+
+There is no `--value <v>`-style option, since that would leave the value in your shell history. Pass values either via the hidden interactive prompt or `--stdin`. On errors — such as `get`-ing an unregistered key — a message is printed to stderr and the process exits with a non-zero exit code.
+
 ## Library API Usage
 
 ### The SecretStore class
@@ -188,7 +263,7 @@ There are nine functions available: `setSecret`, `getSecret`, `tryGetSecret`, `h
 
 ### `lsec run`'s resolution logic (library API)
 
-The pure reference-resolution logic used by the CLI's `run` command (described below) is also exposed as a library API. Use it if you want to apply the same resolution rules from your own tooling without going through the CLI.
+The pure reference-resolution logic used by the CLI's `run` command (described above) is also exposed as a library API. Use it if you want to apply the same resolution rules from your own tooling without going through the CLI.
 
 ```ts
 import { isSecretRef, parseSecretRef, parseEnvFile, resolveEnv, SecretStore } from 'lsec';
@@ -207,81 +282,6 @@ const env = resolveEnv({
   resolveSecret: (ref) => store.get(ref.key, { namespace: ref.namespace }),
 });
 ```
-
-## CLI Usage
-
-```
-lsec set <key> [--ns <namespace>] [--stdin]
-lsec get <key> [--ns <namespace>]
-lsec has <key> [--ns <namespace>]
-lsec list [--ns <namespace>] [--all] [--refs]
-lsec delete <key> [--ns <namespace>]
-lsec namespaces
-lsec delete-namespace <namespace> [--yes]
-lsec rotate-key [--yes]
-lsec run [--dotenv <path>] -- <command> [args...]
-```
-
-```bash
-# Set a value (hidden input via interactive prompt, entered twice for confirmation)
-lsec set github_token
-
-# Set via piped input (for scripts; a single trailing newline is stripped automatically)
-echo -n "ghp_xxxxx" | lsec set github_token --stdin
-
-# Set with a namespace
-lsec set password --ns imap --stdin <<< "p@ss"
-
-# Get (in non-TTY mode, prints to stdout with no trailing newline, so it works with $(...). In TTY mode (run directly in a terminal), a trailing newline is appended)
-lsec get github_token
-TOKEN=$(lsec get github_token)
-
-# Get with a namespace
-lsec get password --ns imap
-
-# Check existence (doesn't print the value; exits 0 if registered, 1 if not)
-lsec has github_token && echo "registered"
-lsec has password --ns imap
-
-# List (global if --ns is omitted; --all lists every namespace)
-lsec list
-lsec list --ns imap
-lsec list --all
-
-# --refs prints each key as an lsec://<namespace>/<key> reference, one per line
-# (can be pasted directly as an environment variable value for lsec run)
-lsec list --all --refs
-# => lsec://global/github_token
-#    lsec://imap/password
-
-# Delete (idempotent; succeeds even if the key isn't registered)
-lsec delete github_token
-
-# List namespaces in use
-lsec namespaces
-
-# Delete an entire namespace (in TTY mode, shows the number of affected keys and asks y/N; --yes skips the prompt)
-lsec delete-namespace imap
-lsec delete-namespace imap --yes
-
-# In non-TTY mode (piped/script execution), --yes is required; without it, the command exits with an error instead of hanging
-lsec delete-namespace imap --yes < /dev/null
-
-# Rotate master.key (generates a new key and re-encrypts all values across global and every namespace)
-# Shows a confirmation prompt in TTY mode; --yes skips it, and --yes is required in non-TTY mode
-lsec rotate-key
-lsec rotate-key --yes
-
-# Inject a secret as an environment variable only for the duration of the specified command (equivalent to the 1Password CLI's `op run`)
-# Everything before "--" is an option for lsec run itself; everything after "--" is the command to run along with its own arguments
-GITHUB_TOKEN="lsec://global/github_token" lsec run -- gh api user
-GITHUB_TOKEN="lsec://global/github_token" lsec run -- npm run dev
-
-# Using --dotenv (values in the file that are lsec://... references are resolved; anything else is passed through as a literal value)
-lsec run --dotenv .env -- npm run dev
-```
-
-There is no `--value <v>`-style option, since that would leave the value in your shell history. Pass values either via the hidden interactive prompt or `--stdin`. On errors — such as `get`-ing an unregistered key — a message is printed to stderr and the process exits with a non-zero exit code.
 
 ## Threat Model Notes
 

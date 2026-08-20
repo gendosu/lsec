@@ -108,7 +108,7 @@ lsec run [--dotenv <path>] -- <command> [args...]
 ```
 
 ```bash
-# Set a value (hidden input via interactive prompt, entered twice for confirmation)
+# Set a value (a single interactive prompt; input is hidden)
 lsec set github_token
 
 # Set via piped input (for scripts; a single trailing newline is stripped automatically)

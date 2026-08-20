@@ -1,6 +1,6 @@
 {
   "name": "lsec",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "description": "Local secret store library/CLI with encryption at rest",
   "type": "module",
   "main": "dist/index.js",

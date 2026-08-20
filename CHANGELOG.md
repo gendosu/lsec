@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-08-20
+
+### Changed
+
+- **Breaking**: CLI `set` now asks for the secret value once instead of twice — the confirmation re-entry (and its mismatch error) was removed. The prompt wording gains an "(input is hidden)" hint so it is clear the CLI is waiting for input even though nothing is echoed
+
+### Fixed
+
+- Fixed CLI `set` waiting for hidden input on a completely blank line: readline's first line refresh erased the question written by `promptHiddenPassword`. The question is now routed through `rl.question()` and re-emitted from the `_writeToOutput` hook, so every refresh redraws it while typed characters stay hidden
+
 ## [0.2.1] - 2026-08-20
 
 ### Added
@@ -56,6 +66,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Fixed `dist` not being built on git-based installs, by adding a `prepare` script
 
-[Unreleased]: https://github.com/gendosu/lsec/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/gendosu/lsec/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/gendosu/lsec/releases/tag/v0.3.0
+[0.2.1]: https://github.com/gendosu/lsec/releases/tag/v0.2.1
 [0.2.0]: https://github.com/gendosu/lsec/releases/tag/v0.2.0
 [0.1.0]: https://github.com/gendosu/lsec/releases/tag/v0.1.0

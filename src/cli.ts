@@ -46,10 +46,10 @@ async function readStdin(stream: NodeJS.ReadableStream = process.stdin): Promise
 
 /**
  * Resolves the value to store for `set`: from stdin (--stdin, for scripts)
- * or from a hidden interactive prompt entered twice (default, for terminals).
- * Throws if the two interactive entries don't match, if the resolved value
- * is empty, or if an interactive prompt is requested on a non-terminal
- * stdin (which would otherwise hang waiting for input).
+ * or from a single hidden interactive prompt (default, for terminals).
+ * Throws if the resolved value is empty, or if an interactive prompt is
+ * requested on a non-terminal stdin (which would otherwise hang waiting
+ * for input).
  */
 async function resolveSetValue(useStdin: boolean): Promise<string> {
   let value: string;
@@ -61,12 +61,7 @@ async function resolveSetValue(useStdin: boolean): Promise<string> {
         'Input is not a terminal, so an interactive prompt cannot be shown. Pipe the value in and pass --stdin instead.'
       );
     }
-    const entered = await promptHiddenPassword('Enter secret value: ');
-    const confirmed = await promptHiddenPassword('Confirm secret value: ');
-    if (entered !== confirmed) {
-      throw new Error('The two entered values do not match.');
-    }
-    value = entered;
+    value = await promptHiddenPassword('Enter secret value (input is hidden): ');
   }
   if (value === '') {
     throw new Error('Secret value must not be empty.');

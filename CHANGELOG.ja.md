@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-08-24
+
+### 修正
+
+- インストールスクリプトのデフォルト配置先を `~/bin` から `~/.local/bin` に変更（XDG の慣例に合わせた）
+
 ## [0.4.0] - 2026-08-24
 
 ### 追加

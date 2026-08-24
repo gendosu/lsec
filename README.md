@@ -26,7 +26,25 @@ Using it as a library requires Node.js 20 or later. The binary CLI does not requ
 
 We recommend downloading a prebuilt binary from GitHub Releases. Node.js is not required at runtime.
 
-#### With the GitHub CLI (recommended)
+#### One-liner install (recommended)
+
+On macOS (Apple Silicon / Intel) and Linux (x86_64 / arm64), a single line installs the CLI. It detects your OS/CPU, downloads the latest release binary, verifies its SHA256 checksum, and places it at `~/bin/lsec` (available while the repository and its releases are publicly accessible).
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/gendosu/lsec/main/install.sh | sh
+```
+
+Environment variables change the destination and the version (put them on the `sh` side of the pipe):
+
+```bash
+# Change the install directory (default: ~/bin)
+curl -fsSL https://raw.githubusercontent.com/gendosu/lsec/main/install.sh | LSEC_INSTALL_DIR="$HOME/.local/bin" sh
+
+# Pin a specific version (default: latest)
+curl -fsSL https://raw.githubusercontent.com/gendosu/lsec/main/install.sh | LSEC_VERSION=v0.3.0 sh
+```
+
+#### With the GitHub CLI
 
 Requires the [GitHub CLI](https://cli.github.com/) authenticated with an account that can access this repository (`gh auth login`). Unlike browser downloads, `gh` does not set the quarantine attribute, so macOS Gatekeeper does not block the downloaded binary.
 
@@ -37,7 +55,7 @@ gh release download --repo gendosu/lsec --pattern lsec-darwin-arm64 --output ~/b
 chmod +x ~/bin/lsec
 ```
 
-#### With curl
+#### Manual download with curl
 
 Available only while the repository (and its releases) is publicly accessible.
 

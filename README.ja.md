@@ -26,7 +26,25 @@ lsec は、ローカルマシン上にシークレット（API キー・トー�
 
 GitHub Releases からビルド済みのバイナリをダウンロードして使う方法を推奨します。実行時に Node.js は不要です。
 
-#### GitHub CLI でダウンロード（推奨）
+#### ワンライナーでインストール（推奨）
+
+macOS（Apple Silicon / Intel）・Linux（x86_64 / arm64）共通で、次の1行でインストールできます。OS・CPU の自動判別、最新リリースのダウンロード、SHA256 チェックサムの検証、`~/bin/lsec` への配置までを自動で行います（リポジトリとそのリリースが公開されている場合に利用できます）。
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/gendosu/lsec/main/install.sh | sh
+```
+
+環境変数で配置先とバージョンを変更できます（環境変数はパイプの `sh` 側に付けます）。
+
+```bash
+# 配置先を変更する（既定: ~/bin）
+curl -fsSL https://raw.githubusercontent.com/gendosu/lsec/main/install.sh | LSEC_INSTALL_DIR="$HOME/.local/bin" sh
+
+# バージョンを固定する（既定: latest）
+curl -fsSL https://raw.githubusercontent.com/gendosu/lsec/main/install.sh | LSEC_VERSION=v0.3.0 sh
+```
+
+#### GitHub CLI でダウンロード
 
 このリポジトリにアクセスできるアカウントで認証済みの [GitHub CLI](https://cli.github.com/)（`gh auth login`）が必要です。ブラウザ経由のダウンロードと違い、`gh` は quarantine 属性を付与しないため、macOS Gatekeeper にブロックされずそのまま実行できます。
 
@@ -37,7 +55,7 @@ gh release download --repo gendosu/lsec --pattern lsec-darwin-arm64 --output ~/b
 chmod +x ~/bin/lsec
 ```
 
-#### curl でダウンロード
+#### curl で手動ダウンロード
 
 リポジトリ（およびそのリリース）が公開されている場合のみ利用できます。
 

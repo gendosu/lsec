@@ -28,7 +28,7 @@ GitHub Releases からビルド済みのバイナリをダウンロードして�
 
 #### ワンライナーでインストール（推奨）
 
-macOS（Apple Silicon / Intel）・Linux（x86_64 / arm64）共通で、次の1行でインストールできます。OS・CPU の自動判別、最新リリースのダウンロード、SHA256 チェックサムの検証、`~/bin/lsec` への配置までを自動で行います（リポジトリとそのリリースが公開されている場合に利用できます）。
+macOS（Apple Silicon / Intel）・Linux（x86_64 / arm64）共通で、次の1行でインストールできます。OS・CPU の自動判別、最新リリースのダウンロード、SHA256 チェックサムの検証、`~/.local/bin/lsec` への配置までを自動で行います（リポジトリとそのリリースが公開されている場合に利用できます）。
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/gendosu/lsec/main/install.sh | sh
@@ -37,8 +37,8 @@ curl -fsSL https://raw.githubusercontent.com/gendosu/lsec/main/install.sh | sh
 環境変数で配置先とバージョンを変更できます（環境変数はパイプの `sh` 側に付けます）。
 
 ```bash
-# 配置先を変更する（既定: ~/bin）
-curl -fsSL https://raw.githubusercontent.com/gendosu/lsec/main/install.sh | LSEC_INSTALL_DIR="$HOME/.local/bin" sh
+# 配置先を変更する（既定: ~/.local/bin）
+curl -fsSL https://raw.githubusercontent.com/gendosu/lsec/main/install.sh | LSEC_INSTALL_DIR="$HOME/bin" sh
 
 # バージョンを固定する（既定: latest）
 curl -fsSL https://raw.githubusercontent.com/gendosu/lsec/main/install.sh | LSEC_VERSION=v0.3.0 sh
@@ -50,9 +50,9 @@ curl -fsSL https://raw.githubusercontent.com/gendosu/lsec/main/install.sh | LSEC
 
 ```bash
 # macOS (Apple Silicon)
-mkdir -p ~/bin
-gh release download --repo gendosu/lsec --pattern lsec-darwin-arm64 --output ~/bin/lsec --clobber
-chmod +x ~/bin/lsec
+mkdir -p ~/.local/bin
+gh release download --repo gendosu/lsec --pattern lsec-darwin-arm64 --output ~/.local/bin/lsec --clobber
+chmod +x ~/.local/bin/lsec
 ```
 
 #### curl で手動ダウンロード
@@ -61,12 +61,12 @@ chmod +x ~/bin/lsec
 
 ```bash
 # macOS (Apple Silicon)
-mkdir -p ~/bin
-curl -fsSL -o ~/bin/lsec https://github.com/gendosu/lsec/releases/latest/download/lsec-darwin-arm64
-chmod +x ~/bin/lsec
+mkdir -p ~/.local/bin
+curl -fsSL -o ~/.local/bin/lsec https://github.com/gendosu/lsec/releases/latest/download/lsec-darwin-arm64
+chmod +x ~/.local/bin/lsec
 ```
 
-`~/bin` が PATH に含まれていない場合は、シェルの設定ファイルで PATH に追加してください。
+`~/.local/bin` が PATH に含まれていない場合は、シェルの設定ファイルで PATH に追加してください。
 
 | アセット | 対象プラットフォーム |
 | --- | --- |

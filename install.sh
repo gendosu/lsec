@@ -5,12 +5,12 @@
 #   curl -fsSL https://raw.githubusercontent.com/gendosu/lsec/main/install.sh | sh
 #
 # Environment variables:
-#   LSEC_INSTALL_DIR  install destination directory (default: ~/bin)
+#   LSEC_INSTALL_DIR  install destination directory (default: ~/.local/bin)
 #   LSEC_VERSION      release tag to install, e.g. v0.3.0 (default: latest)
 set -eu
 
 REPO="gendosu/lsec"
-INSTALL_DIR="${LSEC_INSTALL_DIR:-"$HOME/bin"}"
+INSTALL_DIR="${LSEC_INSTALL_DIR:-"$HOME/.local/bin"}"
 VERSION="${LSEC_VERSION:-latest}"
 
 case "$(uname -s)" in

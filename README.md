@@ -28,7 +28,7 @@ We recommend downloading a prebuilt binary from GitHub Releases. Node.js is not 
 
 #### One-liner install (recommended)
 
-On macOS (Apple Silicon / Intel) and Linux (x86_64 / arm64), a single line installs the CLI. It detects your OS/CPU, downloads the latest release binary, verifies its SHA256 checksum, and places it at `~/bin/lsec` (available while the repository and its releases are publicly accessible).
+On macOS (Apple Silicon / Intel) and Linux (x86_64 / arm64), a single line installs the CLI. It detects your OS/CPU, downloads the latest release binary, verifies its SHA256 checksum, and places it at `~/.local/bin/lsec` (available while the repository and its releases are publicly accessible).
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/gendosu/lsec/main/install.sh | sh
@@ -37,8 +37,8 @@ curl -fsSL https://raw.githubusercontent.com/gendosu/lsec/main/install.sh | sh
 Environment variables change the destination and the version (put them on the `sh` side of the pipe):
 
 ```bash
-# Change the install directory (default: ~/bin)
-curl -fsSL https://raw.githubusercontent.com/gendosu/lsec/main/install.sh | LSEC_INSTALL_DIR="$HOME/.local/bin" sh
+# Change the install directory (default: ~/.local/bin)
+curl -fsSL https://raw.githubusercontent.com/gendosu/lsec/main/install.sh | LSEC_INSTALL_DIR="$HOME/bin" sh
 
 # Pin a specific version (default: latest)
 curl -fsSL https://raw.githubusercontent.com/gendosu/lsec/main/install.sh | LSEC_VERSION=v0.3.0 sh
@@ -50,9 +50,9 @@ Requires the [GitHub CLI](https://cli.github.com/) authenticated with an account
 
 ```bash
 # macOS (Apple Silicon)
-mkdir -p ~/bin
-gh release download --repo gendosu/lsec --pattern lsec-darwin-arm64 --output ~/bin/lsec --clobber
-chmod +x ~/bin/lsec
+mkdir -p ~/.local/bin
+gh release download --repo gendosu/lsec --pattern lsec-darwin-arm64 --output ~/.local/bin/lsec --clobber
+chmod +x ~/.local/bin/lsec
 ```
 
 #### Manual download with curl
@@ -61,12 +61,12 @@ Available only while the repository (and its releases) is publicly accessible.
 
 ```bash
 # macOS (Apple Silicon)
-mkdir -p ~/bin
-curl -fsSL -o ~/bin/lsec https://github.com/gendosu/lsec/releases/latest/download/lsec-darwin-arm64
-chmod +x ~/bin/lsec
+mkdir -p ~/.local/bin
+curl -fsSL -o ~/.local/bin/lsec https://github.com/gendosu/lsec/releases/latest/download/lsec-darwin-arm64
+chmod +x ~/.local/bin/lsec
 ```
 
-If `~/bin` is not on your PATH, add it in your shell's configuration file.
+If `~/.local/bin` is not on your PATH, add it in your shell's configuration file.
 
 | Asset | Target platform |
 | --- | --- |

@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-08-24
+
+### 追加
+
+- クロスプラットフォーム対応のワンライナーインストールスクリプト（ `install.sh` ）: OS/CPU（darwin/linux × arm64/x64）を検出し、GitHub Releases から対応するバイナリをダウンロード（デフォルトは最新版、 `LSEC_VERSION` でバージョン指定可能）、 `SHA256SUMS` で検証した上で `~/bin/lsec` にインストール（ `LSEC_INSTALL_DIR` でインストール先を変更可能）
+
+### 変更
+
+- README: インストール手順の先頭に `install.sh` のワンライナーを配置
+
 ## [0.3.0] - 2026-08-20
 
 ### 変更

@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-08-24
+
+### Added
+
+- Cross-platform one-liner install script ( `install.sh` ): detects OS/CPU (darwin/linux x arm64/x64), downloads the matching binary from GitHub Releases (latest by default, pinnable via `LSEC_VERSION` ), verifies it against `SHA256SUMS` , and installs to `~/bin/lsec` (overridable via `LSEC_INSTALL_DIR` )
+
+### Changed
+
+- README: lead the installation section with the `install.sh` one-liner
+
 ## [0.3.0] - 2026-08-20
 
 ### Changed

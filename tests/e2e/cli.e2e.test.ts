@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import pkg from '../../package.json' with { type: 'json' };
 import { cleanupTmpConfigDir, createTmpConfigDir, runCli } from './helpers.js';
 
 let configDir: string;
@@ -12,6 +13,12 @@ afterEach(() => {
 });
 
 describe('lsec CLI (e2e)', () => {
+  it('--version は package.json の version を出力する', async () => {
+    const result = await runCli(['--version'], configDir);
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout.trim()).toBe(pkg.version);
+  });
+
   it('set(--stdin) -> get -> list -> delete -> namespaces で global の一連が動作する', async () => {
     const setResult = await runCli(['set', 'api_key', '--stdin'], configDir, 'sekret-value\n');
     expect(setResult.exitCode).toBe(0);

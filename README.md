@@ -18,7 +18,7 @@ A general-purpose local secret store that encrypts values with AES-256-GCM and d
 
 Values are strings only (structured JSON values and remote sync are out of scope).
 
-Using it as a library requires Node.js 20 or later. The binary CLI does not require Node.js.
+Using it as a library requires Node.js 20.18.3+, 22.12.0+, or 23.1.0+. The binary CLI does not require Node.js.
 
 ## Installation
 

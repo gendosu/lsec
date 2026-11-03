@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-11-03
+
+### Fixed
+
+- Prebuilt x64 binaries ( `lsec-linux-x64` , `lsec-darwin-x64` ) are now built against bun's baseline target. Previously they crashed with `Illegal instruction` on x64 CPUs without AVX2
+
 ## [0.5.0] - 2026-11-03
 
 ### Changed
@@ -94,7 +100,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Fixed `dist` not being built on git-based installs, by adding a `prepare` script
 
-[Unreleased]: https://github.com/gendosu/lsec/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/gendosu/lsec/compare/v0.5.1...HEAD
+[0.5.1]: https://github.com/gendosu/lsec/releases/tag/v0.5.1
 [0.5.0]: https://github.com/gendosu/lsec/releases/tag/v0.5.0
 [0.4.1]: https://github.com/gendosu/lsec/releases/tag/v0.4.1
 [0.4.0]: https://github.com/gendosu/lsec/releases/tag/v0.4.0

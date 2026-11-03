@@ -16,6 +16,7 @@ import { spawn } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { constants as osConstants } from 'node:os';
 import { Command } from 'commander';
+import pkg from '../package.json' with { type: 'json' };
 import { formatSecretRef, parseEnvFile, resolveEnv, SecretStore, type EnvFileEntry } from './index.js';
 import { promptConfirm, promptHiddenPassword } from './prompt.js';
 
@@ -106,7 +107,7 @@ const program = new Command();
 program
   .name('lsec')
   .description('Encrypted local secret store (library + CLI)')
-  .version('0.1.0')
+  .version(pkg.version)
   // Without this, a bare `--version`/`--help` appearing anywhere in argv
   // (e.g. because the user forgot the "--" before <command> in `run`, see
   // below) is swallowed by *this* top-level program instead of being passed

@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-11-03
+
+### 変更
+
+- **Breaking**: 対応する Node.js の範囲（ `engines.node` ）を `>=20` から `^20.18.3 || ^22.12.0 || >=23.1.0` に引き上げ。npm 版 CLI が `package.json` を JSON モジュールとして import するようになり、これより古いリリースでは読み込めない（20.9）か、実行のたびに `ExperimentalWarning` が出るため。ビルド済みバイナリには影響しない
+- 開発環境: Node / pnpm / bun のバージョンを mise で管理（ `.node-version` 、 `package.json` の `packageManager` 、 `.bun-version` ）
+- 開発環境: `build:bin` スクリプトを `build:bun` に改名
+
+### 修正
+
+- `lsec --version` が `0.1.0` 固定を表示していた問題を修正し、パッケージのバージョンを表示するようにした
+
 ## [0.4.1] - 2026-08-24
 
 ### 修正
@@ -82,7 +94,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - git 経由インストール時に `dist` がビルドされていなかった問題を、`prepare` スクリプト追加により修正
 
-[Unreleased]: https://github.com/gendosu/lsec/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/gendosu/lsec/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/gendosu/lsec/releases/tag/v0.5.0
+[0.4.1]: https://github.com/gendosu/lsec/releases/tag/v0.4.1
+[0.4.0]: https://github.com/gendosu/lsec/releases/tag/v0.4.0
 [0.3.0]: https://github.com/gendosu/lsec/releases/tag/v0.3.0
 [0.2.1]: https://github.com/gendosu/lsec/releases/tag/v0.2.1
 [0.2.0]: https://github.com/gendosu/lsec/releases/tag/v0.2.0

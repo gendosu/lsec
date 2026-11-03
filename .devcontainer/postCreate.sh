@@ -15,4 +15,4 @@ fi
 "$MISE_BIN" trust
 "$MISE_BIN" install
 
-CI=true "$MISE_BIN" exec -- pnpm install
+CI=true MISE_ACTIVATE_AGGRESSIVE=1 "$MISE_BIN" exec -- pnpm install --frozen-lockfile

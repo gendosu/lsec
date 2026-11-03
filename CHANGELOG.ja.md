@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-11-03
+
+### 修正
+
+- ビルド済みの x64 バイナリ（ `lsec-linux-x64` 、 `lsec-darwin-x64` ）を bun の baseline 版でビルドするようにした。これまでは AVX2 に対応していない x64 CPU で `Illegal instruction` により起動できなかった
+
 ## [0.5.0] - 2026-11-03
 
 ### 変更
@@ -94,7 +100,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - git 経由インストール時に `dist` がビルドされていなかった問題を、`prepare` スクリプト追加により修正
 
-[Unreleased]: https://github.com/gendosu/lsec/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/gendosu/lsec/compare/v0.5.1...HEAD
+[0.5.1]: https://github.com/gendosu/lsec/releases/tag/v0.5.1
 [0.5.0]: https://github.com/gendosu/lsec/releases/tag/v0.5.0
 [0.4.1]: https://github.com/gendosu/lsec/releases/tag/v0.4.1
 [0.4.0]: https://github.com/gendosu/lsec/releases/tag/v0.4.0

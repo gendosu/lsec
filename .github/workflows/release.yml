@@ -36,7 +36,13 @@ jobs:
         run: |
           mkdir -p release
           for target in darwin-arm64 darwin-x64 linux-x64 linux-arm64; do
-            bun build --compile --target="bun-${target}" src/cli.ts --outfile "release/lsec-${target}"
+            # Not plain bun-*-x64: on an AVX2 runner it resolves to the modern
+            # build, which dies with SIGILL on x64 CPUs without AVX2.
+            case "$target" in
+              *-x64) bun_target="bun-${target}-baseline" ;;
+              *)     bun_target="bun-${target}" ;;
+            esac
+            bun build --compile --target="$bun_target" src/cli.ts --outfile "release/lsec-${target}"
           done
 
       - name: Run e2e suite against the linux-x64 binary

@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-11-03
+
+### Changed
+
+- **Breaking**: Raise the supported Node.js range ( `engines.node` ) from `>=20` to `^20.18.3 || ^22.12.0 || >=23.1.0`. The npm CLI now imports `package.json` as a JSON module; older releases fail to load it (20.9) or print an `ExperimentalWarning` on every run. The prebuilt binary is unaffected
+- Development: Node / pnpm / bun versions are managed with mise ( `.node-version` , `packageManager` in `package.json` , `.bun-version` )
+- Development: rename the `build:bin` script to `build:bun`
+
+### Fixed
+
+- `lsec --version` reported a hard-coded `0.1.0` ; it now reports the package version
+
 ## [0.4.1] - 2026-08-24
 
 ### Fixed
@@ -82,7 +94,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Fixed `dist` not being built on git-based installs, by adding a `prepare` script
 
-[Unreleased]: https://github.com/gendosu/lsec/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/gendosu/lsec/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/gendosu/lsec/releases/tag/v0.5.0
+[0.4.1]: https://github.com/gendosu/lsec/releases/tag/v0.4.1
+[0.4.0]: https://github.com/gendosu/lsec/releases/tag/v0.4.0
 [0.3.0]: https://github.com/gendosu/lsec/releases/tag/v0.3.0
 [0.2.1]: https://github.com/gendosu/lsec/releases/tag/v0.2.1
 [0.2.0]: https://github.com/gendosu/lsec/releases/tag/v0.2.0

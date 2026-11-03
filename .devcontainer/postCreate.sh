@@ -15,5 +15,4 @@ fi
 "$MISE_BIN" trust
 "$MISE_BIN" install
 
-"$MISE_BIN" exec -- corepack enable
 CI=true "$MISE_BIN" exec -- pnpm install

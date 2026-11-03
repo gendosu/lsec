@@ -88,7 +88,7 @@ xattr -d com.apple.quarantine <path>
 
 ```bash
 pnpm install
-pnpm build:bin
+pnpm build:bun
 ```
 
 `bin/lsec` に単一バイナリが生成されます。

@@ -54,7 +54,7 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
-      - run: pnpm build:bin
+      - run: pnpm build:bun
 
       - name: Run e2e suite against the binary
         run: LSEC_E2E_CLI="$PWD/bin/lsec" pnpm test:e2e

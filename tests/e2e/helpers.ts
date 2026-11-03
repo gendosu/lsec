@@ -65,7 +65,7 @@ export function runCli(
       reject(
         new Error(
           CLI_OVERRIDE
-            ? `LSEC_E2E_CLI=${CLI_OVERRIDE} does not exist. Run "pnpm build:bin" (or fix the path) first.`
+            ? `LSEC_E2E_CLI=${CLI_OVERRIDE} does not exist. Run "pnpm build:bun" (or fix the path) first.`
             : `${CLI_PATH} does not exist. Run "pnpm build" before running e2e tests.`
         )
       );

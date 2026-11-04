@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { resolveEnv } from '../src/run-env.js';
+import { validateRunEnv } from '../src/index.js';
 import type { SecretRef } from '../src/secret-ref.js';
 
 describe('resolveEnv', () => {
@@ -156,5 +157,85 @@ describe('resolveEnv', () => {
     });
     expect(env['__proto__']).toBe('resolved-proto-secret');
     expect(Object.prototype.hasOwnProperty.call(env, '__proto__')).toBe(true);
+  });
+});
+
+describe('validateRunEnv', () => {
+  const prefix = 'DUMMY_PRIVATE_PREFIX';
+  const suffix = 'DUMMY_PRIVATE_SUFFIX';
+
+  it.each([
+    `\0${prefix}${suffix}`,
+    `${prefix}\0${suffix}`,
+    `${prefix}${suffix}\0`,
+  ])('rejects resolved NUL values without exposing any part of the value (case %#)', (value) => {
+    const env = resolveEnv({
+      processEnv: { TOKEN: 'lsec://global/token' },
+      resolveSecret: () => value,
+    });
+    let error: unknown;
+    try {
+      validateRunEnv(env);
+    } catch (caught) {
+      error = caught;
+    }
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toBe(
+      'Invalid value for environment variable "TOKEN": NUL bytes are not allowed.'
+    );
+    for (const surface of [(error as Error).message, (error as Error).stack]) {
+      expect(surface).not.toContain(value);
+      expect(surface).not.toContain(prefix);
+      expect(surface).not.toContain(suffix);
+    }
+    expect((error as Error).cause).toBeUndefined();
+  });
+
+  it('rejects literal NUL values from dotenv', () => {
+    const env = resolveEnv({
+      processEnv: {},
+      envFileEntries: [{ key: 'TOKEN', value: `${prefix}\0${suffix}` }],
+      resolveSecret: vi.fn(),
+    });
+    expect(() => validateRunEnv(env)).toThrow(
+      'Invalid value for environment variable "TOKEN": NUL bytes are not allowed.'
+    );
+  });
+
+  it.each([undefined, null, 42, true, Symbol(prefix), { toString: vi.fn(() => prefix) }])(
+    'rejects non-string values without coercion (case %#)',
+    (value) => {
+      expect(() => validateRunEnv({ TOKEN: value })).toThrow(
+        'Invalid value for environment variable "TOKEN": value must be a string.'
+      );
+      if (typeof value === 'object' && value !== null) {
+        expect(value.toString).not.toHaveBeenCalled();
+      }
+    }
+  );
+
+  it('preserves valid strings and the null prototype without changing process.env', () => {
+    const processEnv = { EMPTY: '', MULTILINE: 'line1\nline2', UNICODE: '日本語🔑', EQUALS: 'a=b' };
+    const env = resolveEnv({
+      processEnv,
+      envFileEntries: [{ key: '__proto__', value: 'proto-value' }],
+      resolveSecret: vi.fn(),
+    });
+    const before = { ...env };
+    expect(() => validateRunEnv(env)).not.toThrow();
+    expect({ ...env }).toEqual(before);
+    expect(Object.getPrototypeOf(env)).toBeNull();
+    expect(env.__proto__).toBe('proto-value');
+    expect(processEnv).toEqual({ EMPTY: '', MULTILINE: 'line1\nline2', UNICODE: '日本語🔑', EQUALS: 'a=b' });
+  });
+
+  it('validates only the final map after dotenv overrides an invalid resolved value', () => {
+    const env = resolveEnv({
+      processEnv: { TOKEN: 'lsec://global/token' },
+      envFileEntries: [{ key: 'TOKEN', value: 'safe-replacement' }],
+      resolveSecret: () => `${prefix}\0${suffix}`,
+    });
+    expect(() => validateRunEnv(env)).not.toThrow();
+    expect(env.TOKEN).toBe('safe-replacement');
   });
 });

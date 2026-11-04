@@ -15,7 +15,6 @@ import {
   decrypt,
   encrypt,
   generateMasterKey,
-  hasMasterKeyBackup,
   loadOrCreateMasterKey,
   removeMasterKeyBackup,
   writeMasterKeyAtomic,
@@ -44,36 +43,21 @@ export interface SecretOpts {
  */
 export class SecretStore {
   private readonly configDir: string;
-  private masterKey: Buffer | undefined;
 
   constructor(options?: SecretStoreOptions) {
     this.configDir = resolveConfigDir(options);
   }
 
   /**
-   * Lazily loads (or creates, on first use) the master key for this
-   * instance's `configDir`. Recovery checks invalidate the cache so reads
-   * reflect the current on-disk key while a backup remains. That key is
-   * never cached: manual recovery may replace it before removing the backup.
+   * Loads the current key on demand so completed rotations by another
+   * instance or process are visible to the next operation.
    */
   private getMasterKey(): Buffer {
-    if (hasMasterKeyBackup(this.configDir)) {
-      this.masterKey = undefined;
-      return loadOrCreateMasterKey(this.configDir);
-    }
-    if (!this.masterKey) {
-      this.masterKey = loadOrCreateMasterKey(this.configDir);
-    }
-    return this.masterKey;
+    return loadOrCreateMasterKey(this.configDir);
   }
 
   private assertWritable(): void {
-    try {
-      assertNoMasterKeyBackup(this.configDir);
-    } catch (err) {
-      this.masterKey = undefined;
-      throw err;
-    }
+    assertNoMasterKeyBackup(this.configDir);
   }
 
   /**
@@ -243,7 +227,6 @@ export class SecretStore {
       stage = 'backup cleanup';
       removeMasterKeyBackup(this.configDir);
     } catch (cause) {
-      this.masterKey = undefined;
       const saved = stage === 'backup cleanup'
         ? 'The new master.key and secrets.json were saved; backup cleanup failed. '
         : '';
@@ -255,7 +238,6 @@ export class SecretStore {
       );
     }
 
-    this.masterKey = newKey;
     return reencryptedCount;
   }
 }

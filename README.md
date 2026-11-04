@@ -18,7 +18,17 @@ A general-purpose local secret store that encrypts values with AES-256-GCM and d
 
 Values are strings only (structured JSON values and remote sync are out of scope).
 
-Using it as a library requires Node.js 20.18.3+, 22.12.0+, or 23.1.0+. The binary CLI does not require Node.js.
+The library and the CLI running on Node.js support only these major versions:
+
+| Node.js major | Minimum version |
+| --- | --- |
+| 22 | 22.12.0 |
+| 24 | 24.0.0 |
+| 26 | 26.0.0 |
+
+The supported range is `^22.12.0 || ^24.0.0 || ^26.0.0`. CI tests the minimum and latest release of each supported major. Use the latest patch release of a supported major. Additional major versions require explicit validation and updates to `engines.node`, CI, and this documentation before they are supported.
+
+The prebuilt binary CLI does not require Node.js and is unaffected by this support policy.
 
 ## Installation
 
@@ -84,14 +94,52 @@ xattr -d com.apple.quarantine <path>
 
 ### Building from source
 
-`bun` is required (used to build the single binary).
+Install [mise](https://mise.jdx.dev/getting-started.html) and run the following commands from the repository root. `mise.toml` enables the version files for the development tools: `.node-version` selects Node.js, `package.json`'s `packageManager` selects pnpm, and `.bun-version` selects Bun (used to build the single binary). These development versions are separate from the library's runtime requirements above.
+
+If `mise` is not on PATH, replace it in each command with its absolute path, such as `"$HOME/.local/bin/mise"` for the default installation.
+
+Review the repository configuration, then trust it and install its tools:
+
+Development uses Node.js 26, as selected by `.node-version`. This development setting is separate from the supported runtime versions listed above.
 
 ```bash
-pnpm install
-pnpm build:bun
+mise trust
+mise install
 ```
 
-This produces a single binary at `bin/lsec`.
+Use [mise exec](https://mise.jdx.dev/cli/exec.html) in scripts and non-interactive shells without relying on automatic shell activation. `MISE_ACTIVATE_AGGRESSIVE=1` [keeps mise's tools ahead of competing PATH entries](https://mise.jdx.dev/configuration/settings.html#activate_aggressive), including nodenv shims. This also ensures that pnpm's child processes (including npm in the `prepare` script) use the selected Node.js. The setting applies only to each command.
+
+Check the versions and the Node.js executable used by a pnpm child process:
+
+```bash
+MISE_ACTIVATE_AGGRESSIVE=1 mise exec -- node --version
+MISE_ACTIVATE_AGGRESSIVE=1 mise exec -- pnpm --version
+MISE_ACTIVATE_AGGRESSIVE=1 mise exec -- bun --version
+MISE_ACTIVATE_AGGRESSIVE=1 mise exec -- pnpm exec node -p 'JSON.stringify({version:process.version,execPath:process.execPath})'
+```
+
+The versions should match the repository's version files, and the child process's `execPath` should point to mise's Node.js installation.
+
+Install dependencies, build the library, and run the tests:
+
+```bash
+MISE_ACTIVATE_AGGRESSIVE=1 mise exec -- pnpm install --frozen-lockfile
+MISE_ACTIVATE_AGGRESSIVE=1 mise exec -- pnpm build
+MISE_ACTIVATE_AGGRESSIVE=1 mise exec -- pnpm test:unit
+MISE_ACTIVATE_AGGRESSIVE=1 mise exec -- pnpm test:e2e
+```
+
+Build the single binary at `bin/lsec`, then check it and run the same E2E suite against it:
+
+```bash
+MISE_ACTIVATE_AGGRESSIVE=1 mise exec -- pnpm build:bun
+./bin/lsec --version
+LSEC_E2E_CLI="$PWD/bin/lsec" MISE_ACTIVATE_AGGRESSIVE=1 mise exec -- pnpm test:e2e
+```
+
+For interactive use, place mise activation after nodenv/anyenv initialization and other PATH changes in the startup file your shell actually reads (for example, `~/.bashrc` for interactive Bash or `~/.zshrc` for Zsh). Bash login shells may need to source `~/.bashrc` from `~/.bash_profile` after initializing nodenv/anyenv. Use `eval "$(mise activate bash)"` for Bash or `eval "$(mise activate zsh)"` for Zsh, then open a new shell and run `command -v node` and `command -v pnpm` in the repository root to check that mise's tools take precedence. Non-interactive execution should keep using the explicit commands above.
+
+The Dev Container's `.devcontainer/postCreate.sh` uses the same trust/install sequence and `CI=true MISE_ACTIVATE_AGGRESSIVE=1 mise exec -- pnpm install --frozen-lockfile` for dependency installation.
 
 ### Using it as a library
 
@@ -350,6 +398,7 @@ Key names and namespace names are stored in plaintext; **only the values** are e
 
 `lsec rotate-key` (or, on the library side, `SecretStore#rotateMasterKey()` / `rotateMasterKey()`) generates a new `master.key` and re-encrypts every value in `global` and all `namespace`s with the new key.
 
+- **Existing instances**: After a rotation by another instance or the CLI completes successfully, existing `SecretStore` instances and the default-instance functions use the current key on their next read, write, or rotation. Coordinate access so no other operation runs during rotation; reloading the key does not make concurrent operations safe.
 - **Before persistence**: All values are decrypted and re-encrypted in memory first. A decryption failure raises `CryptoError` without changing the key, data, or backup.
 - **Persistence order**: (1) exclusively create `master.key.bak` from the valid current key → (2) replace `master.key` by rename → (3) replace `secrets.json` by rename → (4) remove the backup. These two file replacements are not one transaction. A failure between (2) and (3) leaves old data requiring the backup key. A failure after (3), including backup removal failure, leaves new data requiring the current key. Cleanup failure raises `StoreError` explicitly stating that the new key and data were saved.
 - **Recovery pending**: Any remaining `master.key.bak` path (including an invalid file, directory, or dangling symlink) blocks `set`, `delete`, `deleteNamespace`, and `rotateMasterKey` with `StoreError`, including deletion of missing entries. This applies to existing instances, new instances, and subsequent CLI processes. The backup is never overwritten on retry. Reads use the current on-disk key while recovery is pending; they do not fall back to the backup or a cached old key, and a missing current key is not regenerated. `has`, `list`, and `namespaces` remain available. There is no automatic rollback or backup deletion on failure.
@@ -427,9 +476,17 @@ PLAIN_VALUE=not-a-secret
 lsec run --dotenv .env -- npm run dev
 ```
 
-### When resolution fails
+### When resolution or startup fails
 
 A reference to a nonexistent namespace/key, a malformed reference (one that doesn't match the `lsec://<namespace>/<key>` shape), a nonexistent `--dotenv` path, or malformed `.env` content are all detected before the command is launched; an error is printed to stderr and the process exits with 1 (the child process never runs). Secret values are never included in error messages.
+
+Stored values are general strings: `SecretStore.set` / `get` can round-trip strings containing NUL (`\0`) bytes. Environment-variable injection has stricter requirements. After resolving references and applying all `--dotenv` overrides, `run` rejects NUL-containing or non-string values before launching the child, prints only the variable name and problem type, and exits with 1. This also applies to literal values in `.env` files. For example:
+
+```text
+Error: Invalid value for environment variable "TOKEN": NUL bytes are not allowed.
+```
+
+If process startup fails, `run` exits with 1 and prints a fixed diagnostic, without exposing the runtime's original error or resolved values. Known causes include command not found (`ENOENT`), permission denied (`EACCES`), oversized arguments or environment (`E2BIG`), and invalid process arguments or environment (`ERR_INVALID_ARG_VALUE`). Other startup failures receive a generic diagnostic.
 
 The child process's exit code or signal propagates directly as `lsec run`'s own exit code (if terminated by a signal, it's `128 + signal number`).
 

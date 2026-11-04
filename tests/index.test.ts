@@ -1,4 +1,7 @@
-import { describe, expect, it } from 'vitest';
+import * as fs from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   CryptoError,
   deleteNamespace,
@@ -7,6 +10,7 @@ import {
   hasSecret,
   listNamespaces,
   listSecrets,
+  rotateMasterKey,
   SecretNotFoundError,
   SecretStore,
   setSecret,
@@ -55,10 +59,6 @@ describe('error classes', () => {
 });
 
 describe('default-instance sugar functions', () => {
-  // Intentionally not invoked: these delegate to a default SecretStore with
-  // no configDir injection point, so calling them would read/write under
-  // the real ~/.config/local-secret. Reference-only (typeof) checks suffice
-  // for this task's acceptance criteria ("index経由のエクスポートが全て参照できる").
   it.each([
     ['setSecret', setSecret],
     ['getSecret', getSecret],
@@ -68,9 +68,68 @@ describe('default-instance sugar functions', () => {
     ['listSecrets', listSecrets],
     ['listNamespaces', listNamespaces],
     ['deleteNamespace', deleteNamespace],
+    ['rotateMasterKey', rotateMasterKey],
   ])('%s is exported as a function', (_name, fn) => {
     expect(typeof fn).toBe('function');
   });
+});
+
+describe('default instance after external rotation', () => {
+  let configDir: string;
+
+  beforeEach(() => {
+    configDir = fs.mkdtempSync(path.join(os.tmpdir(), 'local-secret-index-test-'));
+    vi.resetModules();
+    vi.doMock('../src/paths.js', async (importOriginal) => {
+      const paths = await importOriginal<typeof import('../src/paths.js')>();
+      return {
+        ...paths,
+        resolveConfigDir: (options?: SecretStoreOptions) => options?.configDir ?? configDir,
+      };
+    });
+  });
+
+  afterEach(() => {
+    vi.doUnmock('../src/paths.js');
+    vi.resetModules();
+    fs.rmSync(configDir, { recursive: true, force: true });
+  });
+
+  it.each(['getSecret', 'tryGetSecret', 'setSecret', 'rotateMasterKey'] as const)(
+    '%s as the first operation follows a rotation by another instance',
+    async (firstOperation) => {
+      const api = await import('../src/index.js');
+      expect(fs.readdirSync(configDir)).toEqual([]);
+      api.setSecret('original', 'original-value');
+      api.setSecret('token', 'work-value', { namespace: 'work' });
+      const other = new api.SecretStore({ configDir });
+      expect(other.rotateMasterKey()).toBe(2);
+
+      switch (firstOperation) {
+        case 'getSecret':
+        case 'tryGetSecret':
+          expect(api[firstOperation]('original')).toBe('original-value');
+          break;
+        case 'setSecret':
+          api.setSecret('later', 'later-value');
+          break;
+        case 'rotateMasterKey':
+          expect(api.rotateMasterKey()).toBe(2);
+          break;
+      }
+
+      expect(api.getSecret('original')).toBe('original-value');
+      expect(api.tryGetSecret('token', { namespace: 'work' })).toBe('work-value');
+      api.setSecret('later', 'later-value');
+      api.setSecret('token', 'updated-work-value', { namespace: 'work' });
+      expect(api.rotateMasterKey()).toBe(3);
+      const reader = new api.SecretStore({ configDir });
+      expect(reader.get('original')).toBe('original-value');
+      expect(reader.get('later')).toBe('later-value');
+      expect(reader.get('token', { namespace: 'work' })).toBe('updated-work-value');
+      expect(fs.existsSync(path.join(configDir, 'master.key.bak'))).toBe(false);
+    }
+  );
 });
 
 describe('type exports', () => {

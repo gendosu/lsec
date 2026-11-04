@@ -18,7 +18,17 @@ lsec は、ローカルマシン上にシークレット（API キー・トー�
 
 値は文字列のみを扱います（構造化 JSON 値やリモート同期はスコープ外です）。
 
-ライブラリとして使う場合は Node.js 20.18.3 以上 / 22.12.0 以上 / 23.1.0 以上が必要です。バイナリ版 CLI は Node.js 不要です。
+ライブラリと Node.js 上で動かす CLI は、次のメジャーバージョンのみに対応します。
+
+| Node.js メジャー版 | 最低バージョン |
+| --- | --- |
+| 22 | 22.12.0 |
+| 24 | 24.0.0 |
+| 26 | 26.0.0 |
+
+対応範囲は `^22.12.0 || ^24.0.0 || ^26.0.0` です。CI では各メジャー版の最低版と最新版を検証します。対応メジャー版の最新パッチ版を推奨します。新しいメジャー版は、明示的な検証と `engines.node`・CI・本ドキュメントの更新を経て対応に追加します。
+
+ビルド済みバイナリ版 CLI は Node.js を必要とせず、このサポート方針の影響を受けません。
 
 ## インストール方法
 
@@ -84,14 +94,52 @@ xattr -d com.apple.quarantine <path>
 
 ### ソースからビルド
 
-`bun` が必要です（単一バイナリのビルドに使用します）。
+[mise](https://mise.jdx.dev/getting-started.html) をインストールし、リポジトリルートで以下のコマンドを実行してください。`mise.toml` は開発ツールのバージョン指定ファイルを有効にしています。Node.js は `.node-version`、pnpm は `package.json` の `packageManager`、単一バイナリのビルドに使う Bun は `.bun-version` で選択します。これらの開発用バージョンと、前述のライブラリの実行要件は別です。
+
+`mise` が PATH にない場合は、各コマンドの `mise` をインストール先の絶対パス（既定のインストールなら `"$HOME/.local/bin/mise"`）に置き換えてください。
+
+リポジトリの設定内容を確認してから、この設定を信頼し、ツールをインストールします。
+
+開発には `.node-version` で指定した Node.js 26 を使用します。この開発用の指定と、上記の利用者向け対応バージョンは別のものです。
 
 ```bash
-pnpm install
-pnpm build:bun
+mise trust
+mise install
 ```
 
-`bin/lsec` に単一バイナリが生成されます。
+スクリプトや非対話シェルでは、自動 activation に依存せず [mise exec](https://mise.jdx.dev/cli/exec.html) を使います。`MISE_ACTIVATE_AGGRESSIVE=1` は、nodenv の shim など、[競合する PATH のエントリより mise のツールを優先する設定](https://mise.jdx.dev/configuration/settings.html#activate_aggressive)です。pnpm の子プロセス（`prepare` スクリプトの npm を含む）も、選択した Node.js を使用できます。この指定は各コマンドにのみ適用されます。
+
+バージョンと、pnpm の子プロセスが使う Node.js の実行ファイルを確認します。
+
+```bash
+MISE_ACTIVATE_AGGRESSIVE=1 mise exec -- node --version
+MISE_ACTIVATE_AGGRESSIVE=1 mise exec -- pnpm --version
+MISE_ACTIVATE_AGGRESSIVE=1 mise exec -- bun --version
+MISE_ACTIVATE_AGGRESSIVE=1 mise exec -- pnpm exec node -p 'JSON.stringify({version:process.version,execPath:process.execPath})'
+```
+
+バージョンがリポジトリの指定と一致し、子プロセスの `execPath` が mise の Node.js インストール先を指すことを確認してください。
+
+依存関係をインストールし、ライブラリのビルドとテストを実行します。
+
+```bash
+MISE_ACTIVATE_AGGRESSIVE=1 mise exec -- pnpm install --frozen-lockfile
+MISE_ACTIVATE_AGGRESSIVE=1 mise exec -- pnpm build
+MISE_ACTIVATE_AGGRESSIVE=1 mise exec -- pnpm test:unit
+MISE_ACTIVATE_AGGRESSIVE=1 mise exec -- pnpm test:e2e
+```
+
+`bin/lsec` に単一バイナリを生成し、起動確認と同じ E2E スイートをバイナリに対して実行します。
+
+```bash
+MISE_ACTIVATE_AGGRESSIVE=1 mise exec -- pnpm build:bun
+./bin/lsec --version
+LSEC_E2E_CLI="$PWD/bin/lsec" MISE_ACTIVATE_AGGRESSIVE=1 mise exec -- pnpm test:e2e
+```
+
+対話シェルで使う場合は、そのシェルが実際に読み込む初期化ファイル（例: 対話 Bash の `~/.bashrc`、Zsh の `~/.zshrc`）で、nodenv/anyenv の初期化と他の PATH 変更の後に mise の activation を配置してください。Bash のログインシェルでは、nodenv/anyenv の初期化後に `~/.bash_profile` から `~/.bashrc` を読み込む必要がある場合もあります。Bash では `eval "$(mise activate bash)"`、Zsh では `eval "$(mise activate zsh)"` を使い、新しいシェルを開いてリポジトリルートで `command -v node` と `command -v pnpm` を実行し、mise のツールが優先されることを確認します。非対話実行では、上記の明示的なコマンドを使用してください。
+
+Dev Container の `.devcontainer/postCreate.sh` も同じ trust/install の順序と、依存導入用の `CI=true MISE_ACTIVATE_AGGRESSIVE=1 mise exec -- pnpm install --frozen-lockfile` を使用します。
 
 ### ライブラリとして使う場合
 
@@ -350,6 +398,7 @@ key 名・namespace 名は平文で保存され、**値のみ**が AES-256-GCM �
 
 `lsec rotate-key`（ライブラリ側は `SecretStore#rotateMasterKey()` / `rotateMasterKey()`）で、新しい `master.key` を生成し、`global` と全 `namespace` の値をすべて新しい鍵で再暗号化できます。
 
+- **既存インスタンスの継続利用**: 別インスタンスや CLI のローテーションが正常完了した後は、既存の `SecretStore` インスタンスと既定インスタンスの関数も、次の読み取り・書き込み・ローテーションで現行鍵を使います。ローテーション中にほかの操作が走らないよう利用側で調整してください。鍵の再読み込みだけでは同時操作の安全性を保証しません。
 - **永続化前の中断**: 全値の復号と再暗号化を先にメモリ上で完了させます。復号に失敗すると `CryptoError` を投げ、鍵・データ・バックアップを変更せず中断します。
 - **永続化の順序**: (1) 有効な現行鍵から `master.key.bak` を排他的に新規作成 → (2) rename で `master.key` を置換 → (3) rename で `secrets.json` を置換 → (4) バックアップを削除。2ファイルの置換は単一トランザクションではありません。(2) と (3) の間の失敗では旧データにバックアップ鍵が必要です。(3) の後の失敗（バックアップ削除失敗を含む）では新データに現行鍵が必要です。削除失敗時は新鍵とデータの保存が完了したことを明示する `StoreError` を投げます。
 - **復旧待ち**: `master.key.bak` のパスが残っている間は、不正なファイル・ディレクトリ・リンク切れの symlink も含め、`set`・`delete`・`deleteNamespace`・`rotateMasterKey` を `StoreError` で拒否します。未登録項目の削除、同一・新規インスタンス、次の CLI プロセスも対象です。再試行でバックアップを上書きしません。復旧待ち中の読み取りはディスク上の現行鍵を使い、バックアップや古いキャッシュへフォールバックせず、現行鍵が欠落していても新しく生成しません。`has`・`list`・`namespaces` は利用できます。失敗時の自動ロールバックや自動バックアップ削除は行いません。
@@ -427,9 +476,17 @@ PLAIN_VALUE=not-a-secret
 lsec run --dotenv .env -- npm run dev
 ```
 
-### 解決に失敗した場合
+### 解決・起動に失敗した場合
 
 存在しない namespace/key への参照、不正な参照形式（`lsec://<namespace>/<key>` の形に一致しない）、存在しない `--dotenv` のパスや壊れた `.env` の内容は、いずれもコマンドを起動する前に検出され、stderr にエラーを出力して exit 1 で終了します（子プロセスは実行されません）。シークレットの値がエラーメッセージに含まれることはありません。
+
+保存値は一般の文字列であり、`SecretStore.set` / `get` では NUL（`\0`）を含む文字列もそのまま保存・取得できます。環境変数への注入には別の制約があります。`run` は参照の解決とすべての `--dotenv` の上書き後に、NUL を含む値や文字列以外の値を子プロセスの起動前に拒否し、変数名と問題種別だけを表示して exit 1 で終了します。`.env` ファイル内のリテラル値にも同じ制約を適用します。診断の例:
+
+```text
+Error: Invalid value for environment variable "TOKEN": NUL bytes are not allowed.
+```
+
+プロセスの起動に失敗した場合も、`run` はランタイムの元の例外や解決済みの値を表示せず、固定の診断メッセージを出して exit 1 で終了します。既知の原因は、コマンドが見つからない（`ENOENT`）、実行権限がない（`EACCES`）、引数や環境変数が大きすぎる（`E2BIG`）、引数や環境変数が不正（`ERR_INVALID_ARG_VALUE`）として識別できます。それ以外の起動失敗には汎用の診断を表示します。
 
 子プロセスの終了コード・シグナルは、そのまま `lsec run` 自身の終了コードとして伝播します（シグナルで終了した場合は `128 + シグナル番号`）。
 

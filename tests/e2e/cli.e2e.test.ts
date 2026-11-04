@@ -2,6 +2,8 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import pkg from '../../package.json' with { type: 'json' };
+import { existsSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { cleanupTmpConfigDir, createTmpConfigDir, runCli } from './helpers.js';
 
 let configDir: string;
@@ -303,6 +305,57 @@ describe('lsec CLI (e2e)', () => {
     }
   );
 
+  it.each(['get', 'tryGet', 'set', 'rotateMasterKey'] as const)(
+    'CLI のローテーション後、既存ライブラリの最初の %s が現行鍵に追従する',
+    async (firstOperation) => {
+      const { SecretStore } = await import('../../dist/index.js');
+      const { readFileSync, existsSync } = await import('node:fs');
+      const { join } = await import('node:path');
+      const store = new SecretStore({ configDir });
+      store.set('original', 'global-value');
+      store.set('token', 'work-value', { namespace: 'work' });
+      const keyBefore = readFileSync(join(configDir, 'master.key'));
+
+      const rotation = await runCli(['rotate-key', '--yes'], configDir);
+      expect(rotation.exitCode).toBe(0);
+      expect(rotation.stderr).toContain('re-encrypted 2 secret(s).');
+      expect(readFileSync(join(configDir, 'master.key')).equals(keyBefore)).toBe(false);
+      expect(existsSync(join(configDir, 'master.key.bak'))).toBe(false);
+
+      switch (firstOperation) {
+        case 'get':
+          expect(store.get('original')).toBe('global-value');
+          break;
+        case 'tryGet':
+          expect(store.tryGet('token', { namespace: 'work' })).toBe('work-value');
+          break;
+        case 'set':
+          store.set('later', 'later-value');
+          break;
+        case 'rotateMasterKey':
+          expect(store.rotateMasterKey()).toBe(2);
+          break;
+      }
+
+      expect(store.get('original')).toBe('global-value');
+      expect(store.tryGet('token', { namespace: 'work' })).toBe('work-value');
+      store.set('later', 'later-value');
+      store.set('token', 'updated-work-value', { namespace: 'work' });
+      const reader = new SecretStore({ configDir });
+      for (const [key, value, namespace] of [
+        ['original', 'global-value', undefined],
+        ['later', 'later-value', undefined],
+        ['token', 'updated-work-value', 'work'],
+      ] as const) {
+        expect(reader.get(key, { namespace })).toBe(value);
+        const args = ['get', key, ...(namespace ? ['--ns', namespace] : [])];
+        const result = await runCli(args, configDir);
+        expect(result.exitCode).toBe(0);
+        expect(result.stdout).toBe(value);
+      }
+    }
+  );
+
   it('非TTY で --yes を付けない rotate-key はエラーで非ゼロ終了する（ハングしない）', async () => {
     await runCli(['set', 'api_key', '--stdin'], configDir, 'sekret-value');
 
@@ -401,6 +454,67 @@ describe('run (op run 相当のシークレット注入コマンド)', () => {
   it('子プロセスの終了コードがそのまま親の終了コードとして伝播する', async () => {
     const result = await runCli(['run', '--', process.execPath, '-e', 'process.exit(3)'], configDir);
     expect(result.exitCode).toBe(3);
+  });
+
+  it.each(['parent reference', 'dotenv reference', 'dotenv literal'])(
+    '%s の NUL 値は値を表示せず拒否し、子プロセスを起動しない',
+    async (source) => {
+      const prefix = 'DUMMY_PRIVATE_PREFIX';
+      const suffix = 'DUMMY_PRIVATE_SUFFIX';
+      const value = `${prefix}\0${suffix}`;
+      const otherValue = 'DUMMY_OTHER_RESOLVED_SECRET';
+      expect((await runCli(['set', 'token', '--stdin'], configDir, value)).exitCode).toBe(0);
+      expect((await runCli(['set', 'other', '--stdin'], configDir, otherValue)).exitCode).toBe(0);
+      const extraEnv: Record<string, string> = { SAFE_TOKEN: 'lsec://global/other' };
+      const args = ['run'];
+      if (source === 'parent reference') {
+        extraEnv.TOKEN = 'lsec://global/token';
+      } else {
+        const envFile = join(configDir, '.env');
+        writeFileSync(envFile, `TOKEN=${source === 'dotenv literal' ? value : 'lsec://global/token'}\n`);
+        args.push('--dotenv', envFile);
+      }
+      const marker = join(configDir, 'child-ran');
+      args.push('--', process.execPath, '-e', 'require("node:fs").writeFileSync(process.argv[1], "ran")', marker);
+      const result = await runCli(args, configDir, undefined, extraEnv);
+      expect(result.exitCode).toBe(1);
+      expect(result.stdout).toBe('');
+      expect(result.stderr).toBe(
+        'Error: Invalid value for environment variable "TOKEN": NUL bytes are not allowed.\n'
+      );
+      for (const secret of [value, prefix, suffix, otherValue]) {
+        expect(result.stdout + result.stderr).not.toContain(secret);
+      }
+      expect(existsSync(marker)).toBe(false);
+    }
+  );
+
+  it('NUL 入りの解決済み値を dotenv の正常値で上書きした場合は実行できる', async () => {
+    expect((await runCli(['set', 'token', '--stdin'], configDir, 'DUMMY_PREFIX\0DUMMY_SUFFIX')).exitCode).toBe(0);
+    const envFile = join(configDir, '.env');
+    writeFileSync(envFile, 'TOKEN=safe-replacement\n');
+    const result = await runCli(
+      ['run', '--dotenv', envFile, '--', process.execPath, '-e', 'console.log(process.env.TOKEN)'],
+      configDir,
+      undefined,
+      { TOKEN: 'lsec://global/token' }
+    );
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toBe('safe-replacement\n');
+    expect(result.stderr).toBe('');
+  });
+
+  it.each(['ENOENT', 'EACCES'])('参照解決後の起動失敗 %s は安全な診断で exit 1 になる', async (code) => {
+    const value = 'DUMMY_RESOLVED_STARTUP_SECRET';
+    expect((await runCli(['set', 'token', '--stdin'], configDir, value)).exitCode).toBe(0);
+    const command = join(configDir, 'child-command');
+    if (code === 'EACCES') writeFileSync(command, '#!/bin/sh\nexit 0\n', { mode: 0o600 });
+    const result = await runCli(['run', '--', command], configDir, undefined, { TOKEN: 'lsec://global/token' });
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toBe('');
+    expect(result.stderr).toContain(`(${code})`);
+    expect(result.stderr).not.toContain(command);
+    expect(result.stderr).not.toContain(value);
   });
 
   it('子プロセスがシグナルで終了した場合、128 + シグナル番号が親の終了コードとして伝播する', async () => {

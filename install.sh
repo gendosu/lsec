@@ -39,11 +39,22 @@ else
   base_url="https://github.com/${REPO}/releases/download/${VERSION}"
 fi
 
-tmpdir="$(mktemp -d)"
-trap 'rm -rf "$tmpdir"' EXIT INT TERM
+tmpdir=""
+cleanup() {
+  if [ -n "$tmpdir" ]; then
+    rm -rf "$tmpdir"
+  fi
+}
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
+# Stage on the destination filesystem, which may differ from or allow execution unlike TMPDIR.
+mkdir -p "$INSTALL_DIR"
+tmpdir="$(mktemp -d "${INSTALL_DIR}/.lsec-install.XXXXXX")"
 
 echo "Downloading ${asset} (${VERSION}) ..."
-curl -fsSL -o "${tmpdir}/${asset}" "${base_url}/${asset}"
+curl -fsSL -o "${tmpdir}/lsec" "${base_url}/${asset}"
 curl -fsSL -o "${tmpdir}/SHA256SUMS" "${base_url}/SHA256SUMS"
 
 expected="$(awk -v name="$asset" '$2 == name { print $1 }' "${tmpdir}/SHA256SUMS")"
@@ -52,9 +63,9 @@ if [ -z "$expected" ]; then
   exit 1
 fi
 if command -v sha256sum >/dev/null 2>&1; then
-  actual="$(sha256sum "${tmpdir}/${asset}" | awk '{ print $1 }')"
+  actual="$(sha256sum "${tmpdir}/lsec" | awk '{ print $1 }')"
 else
-  actual="$(shasum -a 256 "${tmpdir}/${asset}" | awk '{ print $1 }')"
+  actual="$(shasum -a 256 "${tmpdir}/lsec" | awk '{ print $1 }')"
 fi
 if [ "$expected" != "$actual" ]; then
   echo "lsec: SHA256 checksum mismatch for ${asset}" >&2
@@ -63,12 +74,17 @@ if [ "$expected" != "$actual" ]; then
   exit 1
 fi
 
-mkdir -p "$INSTALL_DIR"
-chmod +x "${tmpdir}/${asset}"
-mv -f "${tmpdir}/${asset}" "${INSTALL_DIR}/lsec"
+chmod +x "${tmpdir}/lsec"
 
-# Smoke check: fails here (not later at first use) if the binary cannot run.
-"${INSTALL_DIR}/lsec" --version > /dev/null
+# Validate before replacing the working installation.
+"${tmpdir}/lsec" --version > /dev/null
+
+if [ -d "${INSTALL_DIR}/lsec" ]; then
+  echo "lsec: install target is a directory: ${INSTALL_DIR}/lsec" >&2
+  exit 1
+fi
+# Use the final basename and its parent so mv cannot descend into an existing lsec/.
+mv -f "${tmpdir}/lsec" "${INSTALL_DIR}/"
 
 echo "Installed: ${INSTALL_DIR}/lsec"
 

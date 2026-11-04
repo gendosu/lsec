@@ -12,7 +12,7 @@
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { spawn } from 'node:child_process';
+import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 
 const CLI_PATH = path.resolve(path.dirname(new URL(import.meta.url).pathname), '../../dist/cli.js');
 
@@ -39,6 +39,31 @@ export function cleanupTmpConfigDir(dir: string): void {
   fs.rmSync(dir, { recursive: true, force: true });
 }
 
+/** Starts the same isolated CLI as runCli, exposing its lifetime for signal tests. */
+export function startCli(
+  args: string[],
+  configDir: string,
+  extraEnv?: Record<string, string>,
+  options: { detached?: boolean } = {}
+): ChildProcessWithoutNullStreams {
+  const execPath = CLI_OVERRIDE ?? process.execPath;
+  const execArgs = CLI_OVERRIDE ? args : [CLI_PATH, ...args];
+  if (!fs.existsSync(CLI_OVERRIDE ?? CLI_PATH)) {
+    throw new Error(
+      CLI_OVERRIDE
+        ? `LSEC_E2E_CLI=${CLI_OVERRIDE} does not exist. Run "pnpm build:bun" (or fix the path) first.`
+        : `${CLI_PATH} does not exist. Run "pnpm build" before running e2e tests.`
+    );
+  }
+  const child = spawn(execPath, execArgs, {
+    ...options,
+    env: { ...process.env, LOCAL_SECRET_CONFIG_DIR: configDir, ...extraEnv },
+  });
+  // Fast argument failures can close stdin before a test finishes writing.
+  child.stdin.on('error', () => {});
+  return child;
+}
+
 /**
  * Runs the built CLI (`dist/cli.js`, requires `pnpm build` to have been run
  * first) as a child process with `LOCAL_SECRET_CONFIG_DIR` set to `configDir`.
@@ -59,22 +84,7 @@ export function runCli(
   extraEnv?: Record<string, string>
 ): Promise<RunResult> {
   return new Promise((resolve, reject) => {
-    const execPath = CLI_OVERRIDE ?? process.execPath;
-    const execArgs = CLI_OVERRIDE ? args : [CLI_PATH, ...args];
-    if (!fs.existsSync(CLI_OVERRIDE ?? CLI_PATH)) {
-      reject(
-        new Error(
-          CLI_OVERRIDE
-            ? `LSEC_E2E_CLI=${CLI_OVERRIDE} does not exist. Run "pnpm build:bun" (or fix the path) first.`
-            : `${CLI_PATH} does not exist. Run "pnpm build" before running e2e tests.`
-        )
-      );
-      return;
-    }
-
-    const child = spawn(execPath, execArgs, {
-      env: { ...process.env, LOCAL_SECRET_CONFIG_DIR: configDir, ...extraEnv },
-    });
+    const child = startCli(args, configDir, extraEnv);
 
     let stdout = '';
     let stderr = '';
@@ -88,11 +98,6 @@ export function runCli(
     child.on('close', (code) => {
       resolve({ stdout, stderr, exitCode: code ?? 1 });
     });
-    // Defensive: if the child exits before consuming stdin (e.g. a fast
-    // argument-parsing failure), writing to its already-closed stdin would
-    // otherwise raise an unhandled 'error' event on the stream.
-    child.stdin.on('error', () => { /* ignore: handled via child's 'close'/'error' above */ });
-
     if (input !== undefined) {
       child.stdin.write(input);
     }

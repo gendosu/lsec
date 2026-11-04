@@ -1,13 +1,69 @@
-import { spawn } from 'node:child_process';
+import { spawn, type ChildProcess } from 'node:child_process';
 import { constants as osConstants } from 'node:os';
 
 /** Runs a child with inherited stdio and propagates its exit code or 128 + signal number. */
 export function runChildProcess(command: string, args: string[], env: Record<string, string>): Promise<number> {
   return new Promise((resolve, reject) => {
+    let child: ChildProcess | undefined;
+    let spawned = false;
+    let exited = false;
+    let finished = false;
+    const pending: NodeJS.Signals[] = [];
+
+    function cleanup(): void {
+      finished = true;
+      pending.length = 0;
+      process.off('SIGTERM', onSigterm);
+      process.off('SIGINT', onSigint);
+    }
+
+    function reportSignalFailure(): void {
+      process.stderr.write('Could not forward signal to child process; waiting for child to exit.\n');
+    }
+
+    function forward(signal: NodeJS.Signals): void {
+      if (finished || exited) return;
+      if (!spawned || !child) {
+        pending.push(signal);
+        return;
+      }
+      if (child.exitCode !== null || child.signalCode !== null) return;
+      try {
+        // killed records delivery, not exit: a child may handle or ignore signals.
+        if (!child.kill(signal)) reportSignalFailure();
+      } catch {
+        reportSignalFailure();
+      }
+    }
+
+    const onSigterm = () => forward('SIGTERM');
+    const onSigint = () => forward('SIGINT');
+    process.on('SIGTERM', onSigterm);
+    process.on('SIGINT', onSigint);
+
     try {
-      const child = spawn(command, args, { stdio: 'inherit', env });
-      child.on('error', (err: unknown) => reject(safeSpawnError(err)));
-      child.on('close', (code, signal) => {
+      child = spawn(command, args, { stdio: 'inherit', env });
+      child.once('spawn', () => {
+        spawned = true;
+        for (const signal of pending.splice(0)) forward(signal);
+      });
+      child.on('error', (err: unknown) => {
+        if (finished) return;
+        if (spawned) {
+          // A failed signal delivery must not orphan a successfully started child.
+          reportSignalFailure();
+        } else {
+          cleanup();
+          reject(safeSpawnError(err));
+        }
+      });
+      child.once('exit', () => {
+        exited = true;
+        pending.length = 0;
+      });
+      child.once('close', (code, signal) => {
+        if (finished) return;
+        cleanup();
         if (signal) {
           resolve(128 + (osConstants.signals[signal] ?? 0));
         } else {
@@ -15,6 +71,7 @@ export function runChildProcess(command: string, args: string[], env: Record<str
         }
       });
     } catch (err) {
+      cleanup();
       reject(safeSpawnError(err));
     }
   });

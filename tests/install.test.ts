@@ -128,7 +128,7 @@ describe('install.sh', () => {
 
   it.each([
     'binary download', 'checksum download', 'missing checksum', 'checksum mismatch',
-    'mkdir', 'mktemp', 'chmod', 'mv', 'unlaunchable binary',
+    'sha256sum', 'shasum', 'mkdir', 'mktemp', 'chmod', 'mv', 'unlaunchable binary',
   ])('preserves the working executable and cleans up after failure at %s', (failure) => {
     const f = fixture(failure === 'unlaunchable binary' ? { binary: '#!/nonexistent/lsec-interpreter\n' } : {});
     if (failure === 'binary download') f.stub('curl', 'process.exit(23);');
@@ -139,7 +139,11 @@ describe('install.sh', () => {
       `);
     } else if (failure === 'missing checksum') fs.writeFileSync(f.releaseSums, '');
     else if (failure === 'checksum mismatch') fs.appendFileSync(f.releaseBinary, '\n# altered download\n');
-    else if (failure !== 'unlaunchable binary') f.stub(failure, 'process.exit(73);');
+    else if (failure === 'sha256sum' || failure === 'shasum') {
+      if (failure === 'shasum') fs.unlinkSync(path.join(f.binDir, 'sha256sum'));
+      const checksum = createHash('sha256').update(f.newBinary).digest('hex');
+      f.stub(failure, `process.stdout.write(${JSON.stringify(checksum + '  lsec\n')}); process.exit(73);`);
+    } else if (failure !== 'unlaunchable binary') f.stub(failure, 'process.exit(73);');
 
     const result = f.run();
 
@@ -260,17 +264,25 @@ describe('install.sh', () => {
     f.expectClean();
   });
 
-  it.each(['SIGINT', 'SIGTERM'] as const)('stops before placement and cleans up after %s during download', async (signal) => {
+  it.each([
+    ['download', 'SIGINT'], ['download', 'SIGTERM'],
+    ['placement', 'SIGINT'], ['placement', 'SIGTERM'],
+  ] as const)('stops and cleans up during %s after %s', async (phase, signal) => {
     const f = fixture();
-    f.stub('curl', `
+    if (phase === 'download') f.stub('curl', `
       const url = args.at(-1);
       fs.appendFileSync(${JSON.stringify(f.downloadLog)}, url + '\\n');
       fs.copyFileSync(url.endsWith('/SHA256SUMS') ? ${JSON.stringify(f.releaseSums)} : ${JSON.stringify(f.releaseBinary)}, args[args.indexOf('-o') + 1]);
       if (!url.endsWith('/SHA256SUMS')) {
         process.on('SIGTERM', () => process.exit(0));
-        process.stdout.write('download-ready:' + process.pid + '\\n');
+        process.stdout.write('command-ready:' + process.pid + '\\n');
         setInterval(() => {}, 1000);
       }
+    `);
+    else f.stub('mv', `
+      process.on('SIGTERM', () => process.exit(143));
+      process.stdout.write('command-ready:' + process.pid + '\\n');
+      setInterval(() => {}, 1000);
     `);
     const child = spawn('/bin/sh', [installer], { env: f.env, stdio: ['ignore', 'pipe', 'pipe'] });
     let stdout = '';
@@ -282,12 +294,12 @@ describe('install.sh', () => {
     });
     child.stdout.on('data', (chunk) => {
       stdout += chunk.toString();
-      const ready = /download-ready:(\d+)\n/.exec(stdout);
+      const ready = /command-ready:(\d+)\n/.exec(stdout);
       if (ready && workerPid === undefined) {
         workerPid = Number(ready[1]);
         child.kill(signal);
-        // sh can defer its trap while waiting, so release the stub after signalling sh.
-        process.kill(workerPid, 'SIGTERM');
+        // A foreground download can defer sh's trap; placement must stop its own child.
+        if (phase === 'download') process.kill(workerPid, 'SIGTERM');
       }
     });
     child.stderr.on('data', (chunk) => { stderr += chunk.toString(); });
@@ -302,7 +314,7 @@ describe('install.sh', () => {
       expect(workerPid).toBeDefined();
       expect(code).toBe(signal === 'SIGINT' ? 130 : 143);
       expect(stdout).not.toContain('Installed:');
-      expect(fs.readFileSync(f.downloadLog, 'utf8').trim().split('\n')).toHaveLength(1);
+      expect(fs.readFileSync(f.downloadLog, 'utf8').trim().split('\n')).toHaveLength(phase === 'download' ? 1 : 2);
       expect(fs.existsSync(f.moveLog)).toBe(false);
       f.expectOldBinary();
       f.expectClean();

@@ -40,14 +40,24 @@ else
 fi
 
 tmpdir=""
+placing=false
 cleanup() {
+  trap '' INT TERM
   if [ -n "$tmpdir" ]; then
     rm -rf "$tmpdir"
   fi
 }
+interrupt() {
+  trap '' INT TERM
+  if [ "$placing" = true ] && [ -n "${!:-}" ]; then
+    kill -TERM "$!" 2>/dev/null || :
+    wait "$!" 2>/dev/null || :
+  fi
+  exit "$1"
+}
 trap cleanup EXIT
-trap 'exit 130' INT
-trap 'exit 143' TERM
+trap 'interrupt 130' INT
+trap 'interrupt 143' TERM
 
 # Stage on the destination filesystem, which may differ from or allow execution unlike TMPDIR.
 mkdir -p "$INSTALL_DIR"
@@ -63,10 +73,11 @@ if [ -z "$expected" ]; then
   exit 1
 fi
 if command -v sha256sum >/dev/null 2>&1; then
-  actual="$(sha256sum "${tmpdir}/lsec" | awk '{ print $1 }')"
+  actual="$(sha256sum "${tmpdir}/lsec")"
 else
-  actual="$(shasum -a 256 "${tmpdir}/lsec" | awk '{ print $1 }')"
+  actual="$(shasum -a 256 "${tmpdir}/lsec")"
 fi
+actual="${actual%% *}"
 if [ "$expected" != "$actual" ]; then
   echo "lsec: SHA256 checksum mismatch for ${asset}" >&2
   echo "  expected: ${expected}" >&2
@@ -84,7 +95,11 @@ if [ -d "${INSTALL_DIR}/lsec" ]; then
   exit 1
 fi
 # Use the final basename and its parent so mv cannot descend into an existing lsec/.
-mv -f "${tmpdir}/lsec" "${INSTALL_DIR}/"
+# An interruptible wait lets the signal handler stop and reap mv before cleanup.
+placing=true
+mv -f "${tmpdir}/lsec" "${INSTALL_DIR}/" &
+wait "$!"
+placing=false
 
 echo "Installed: ${INSTALL_DIR}/lsec"
 

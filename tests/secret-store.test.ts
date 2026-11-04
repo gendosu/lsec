@@ -1,15 +1,18 @@
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { decrypt, encrypt } from '../src/crypto.js';
 import { CryptoError, SecretNotFoundError, StoreError } from '../src/errors.js';
 import { SecretStore } from '../src/secret-store.js';
 import { readStoreFile, writeStoreFile } from '../src/store-file.js';
 
+vi.mock('node:fs', async (original) => ({ ...await original<typeof fs>() }));
+
 const createdDirs: string[] = [];
 
 afterEach(() => {
+  vi.restoreAllMocks();
   while (createdDirs.length > 0) {
     const dir = createdDirs.pop();
     if (dir) {
@@ -539,7 +542,11 @@ describe('rotateMasterKey', () => {
     const secretsPath = path.join(configDir, 'secrets.json');
     const oldKey = fs.readFileSync(keyPath);
     const oldSecrets = fs.readFileSync(secretsPath);
-    fs.mkdirSync(`${secretsPath}.tmp`);
+    const rename = fs.renameSync;
+    vi.spyOn(fs, 'renameSync').mockImplementation((from, to) => {
+      if (to === secretsPath) throw new Error('injected persistence failure');
+      return rename(from, to);
+    });
 
     expect(() => store.rotateMasterKey()).toThrow(StoreError);
     const failedKey = fs.readFileSync(keyPath);

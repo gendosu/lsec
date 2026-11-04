@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { runStoreWorker } from './store-process.js';
 import pkg from '../../package.json' with { type: 'json' };
 import { existsSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -255,12 +256,13 @@ describe('lsec CLI (e2e)', () => {
       const secretsPath = path.join(configDir, 'secrets.json');
       const backupPath = path.join(configDir, 'master.key.bak');
       const oldKey = fs.readFileSync(keyPath);
-      if (stage === 'data persistence') fs.mkdirSync(`${secretsPath}.tmp`);
-      const rotated = await runCli(['rotate-key', '--yes'], configDir);
+      const rotated = stage === 'data persistence'
+        ? await runStoreWorker({ configDir, failAt: 'data', operations: [['rotateMasterKey']] })
+          .then((result) => ({ exitCode: result.code, stderr: result.error?.message ?? '' }))
+        : await runCli(['rotate-key', '--yes'], configDir);
       if (stage === 'data persistence') {
         expect(rotated.exitCode).not.toBe(0);
         expect(rotated.stderr).toContain('secrets.json persistence');
-        fs.rmdirSync(`${secretsPath}.tmp`);
       } else {
         expect(rotated.exitCode).toBe(0);
         // Represents a crash after data persistence but before backup removal.

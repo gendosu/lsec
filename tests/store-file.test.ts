@@ -206,11 +206,10 @@ describe('writeStoreFile', () => {
     expect(mode).toBe(0o600);
   });
 
-  it('removes a stale .tmp file before writing so its content is never carried over', () => {
+  it('keeps another temporary file unchanged without carrying its content into the store', () => {
     const configDir = makeTempConfigDir();
     fs.mkdirSync(configDir, { recursive: true, mode: 0o700 });
-    // Simulate a leftover .tmp file from a previous crashed write, with
-    // unrelated stale content and looser permissions.
+    // The legacy temporary path may still belong to another process.
     fs.writeFileSync(
       path.join(configDir, 'secrets.json.tmp'),
       JSON.stringify({ version: 1, global: { stale: 'leftover' }, namespaces: {} }),
@@ -220,6 +219,8 @@ describe('writeStoreFile', () => {
     writeStoreFile(configDir, { version: 1, global: { fresh: 'value' }, namespaces: {} });
 
     expect(readStoreFile(configDir)).toEqual({ version: 1, global: { fresh: 'value' }, namespaces: {} });
+    expect(JSON.parse(fs.readFileSync(path.join(configDir, 'secrets.json.tmp'), 'utf8')).global).toEqual({ stale: 'leftover' });
+    expect(fs.statSync(path.join(configDir, 'secrets.json.tmp')).mode & 0o777).toBe(0o644);
     const mode = fs.statSync(path.join(configDir, 'secrets.json')).mode & 0o777;
     expect(mode).toBe(0o600);
   });

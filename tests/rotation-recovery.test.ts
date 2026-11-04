@@ -75,17 +75,24 @@ function expectUpdatesBlocked(store: SecretStore, configDir: string) {
   }
 }
 
+function failDataPersistence(configDir: string) {
+  const rename = fs.renameSync;
+  return vi.spyOn(fs, 'renameSync').mockImplementation((from, to) => {
+    if (to === path.join(configDir, 'secrets.json')) throw new Error('injected persistence failure');
+    return rename(from, to);
+  });
+}
+
 describe('pending rotation recovery', () => {
   it('does not retain a failed read key when another reader verifies and clears recovery', () => {
     const { configDir, store } = makeFixture();
     const keyPath = path.join(configDir, 'master.key');
     const backupPath = path.join(configDir, 'master.key.bak');
-    const tmpPath = path.join(configDir, 'secrets.json.tmp');
-    fs.mkdirSync(tmpPath);
+    const failure = failDataPersistence(configDir);
     expect(() => store.rotateMasterKey()).toThrow(StoreError);
     expect(() => store.get('token')).toThrow(CryptoError);
     expect(() => store.tryGet('token')).toThrow(CryptoError);
-    fs.rmdirSync(tmpPath);
+    failure.mockRestore();
     fs.copyFileSync(backupPath, keyPath);
     expectAllValues(new SecretStore({ configDir }));
     fs.unlinkSync(backupPath);
@@ -100,7 +107,7 @@ describe('pending rotation recovery', () => {
 
   it('blocks every mutation in existing and new instances without masking mismatched-key reads', () => {
     const { configDir, store } = makeFixture();
-    fs.mkdirSync(path.join(configDir, 'secrets.json.tmp'));
+    failDataPersistence(configDir);
     expect(() => store.rotateMasterKey()).toThrow(StoreError);
     for (const reader of [store, new SecretStore({ configDir })]) {
       expectUpdatesBlocked(reader, configDir);
@@ -220,10 +227,10 @@ const failurePoints = [
   { method: 'fchmodSync', file: 'fd', stage: 'backup creation', changed: false, backup: true },
   { method: 'closeSync', file: 'fd', stage: 'backup creation', changed: false, backup: true },
   { method: 'writeFileSync', file: 'master.key.tmp', stage: 'master.key replacement', changed: false, backup: true },
-  { method: 'chmodSync', file: 'master.key.tmp', stage: 'master.key replacement', changed: false, backup: true },
+  { method: 'fchmodSync', file: 'master.key.tmp', stage: 'master.key replacement', changed: false, backup: true },
   { method: 'renameSync', file: 'master.key.tmp', stage: 'master.key replacement', changed: false, backup: true },
   { method: 'writeFileSync', file: 'secrets.json.tmp', stage: 'secrets.json persistence', changed: true, backup: true },
-  { method: 'chmodSync', file: 'secrets.json.tmp', stage: 'secrets.json persistence', changed: true, backup: true },
+  { method: 'fchmodSync', file: 'secrets.json.tmp', stage: 'secrets.json persistence', changed: true, backup: true },
   { method: 'renameSync', file: 'secrets.json.tmp', stage: 'secrets.json persistence', changed: true, backup: true },
   { method: 'unlinkSync', file: 'master.key.bak', stage: 'backup cleanup', changed: true, backup: true },
 ] as const;
@@ -255,9 +262,21 @@ describe('rotation persistence failures', () => {
     const backupPath = path.join(configDir, 'master.key.bak');
     const before = snapshot(configDir);
     const cause = Object.assign(new Error('injected failure'), { code: 'EIO' });
+    const descriptors = new Map<number, string>();
+    const open = fs.openSync;
+    vi.spyOn(fs, 'openSync').mockImplementation((file, ...args) => {
+      const fd = open(file, ...args);
+      descriptors.set(fd, String(file));
+      return fd;
+    });
     const realOperation = fs[point.method] as (...args: unknown[]) => unknown;
     const injected = vi.spyOn(fs, point.method).mockImplementation((...args: unknown[]) => {
-      if (point.file === 'fd' ? typeof args[0] === 'number' : args[0] === path.join(configDir, point.file)) {
+      const target = typeof args[0] === 'number' ? descriptors.get(args[0]) : String(args[0]);
+      const matches = point.file === 'fd' ? target === backupPath
+        : point.file.endsWith('.tmp')
+          ? target?.startsWith(path.join(configDir, point.file.slice(0, -4)) + '.') && target.endsWith('.tmp')
+          : target === path.join(configDir, point.file);
+      if (matches) {
         // Release the real descriptor while simulating a reported close failure.
         if (point.method === 'closeSync') realOperation(...args);
         throw cause;

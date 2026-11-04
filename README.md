@@ -370,7 +370,7 @@ The storage location is fixed at `~/.config/local-secret/`, relative to `os.home
 | File | Path | Contents |
 | --- | --- | --- |
 | `master.key` | `~/.config/local-secret/master.key` | 32 random bytes (`crypto.randomBytes(32)`). File permissions are `0o600`, directory permissions are `0o700`. Generated automatically on first access. |
-| `secrets.json` | `~/.config/local-secret/secrets.json` | `0o600`. Written atomically by writing to a `.tmp` file and then `rename`-ing it. |
+| `secrets.json` | `~/.config/local-secret/secrets.json` | `0o600`. Written by exclusively creating a unique private `.tmp` file and then renaming it. |
 | `master.key.bak` | `~/.config/local-secret/master.key.bak` | A recovery backup of the pre-rotation key, created exclusively with mode `0o600`. Removed on successful rotation; if it remains, updates are blocked until recovery is verified (see "Rotating master.key"). |
 
 The structure of `secrets.json`:
@@ -394,11 +394,23 @@ The structure of `secrets.json`:
 
 Key names and namespace names are stored in plaintext; **only the values** are encrypted with AES-256-GCM (a deliberate choice for listing and operability). Each value uses a fresh IV on every save, so the ciphertext differs each time even for the same value.
 
+## Concurrent access and interrupted operations
+
+Every `SecretStore` operation, default-instance function, and CLI store operation serializes access to the same physical config directory using a private `0o700` `.lsec.lock` directory. The lock covers reading, key selection/initial creation, encryption/decryption, changes, persistence, and rotation cleanup. Relative paths and directory symlinks to the same store share the lock; separate stores remain independent. Same-key writes take effect in lock acquisition order. Each call is serialized; multiple separate calls are not one transaction.
+
+The synchronous API waits without busy spinning, retrying every 10 ms for up to 5 seconds. This **blocks the calling thread/event loop** while waiting. A timeout or acquisition error raises `StoreError` before accessing the key/data for that operation. Reads also create lock metadata and therefore require write permission on the config directory. Constructors and imports remain lazy, and missing-key reads do not generate a master key. No API arguments or stored data formats change; existing stores need no migration. Key/data writes use unique, exclusively created `0o600` temporary files and clean up only their own files. An existing legacy `.tmp` path is left untouched.
+
+Normal completion and exceptions release the lock. A release failure raises `StoreError` even if the operation already saved its changes; inspect the result before retrying. If the operation also failed, both errors remain in the error cause. `SIGKILL` or another abrupt exit can leave the lock and private temporary files behind. **Locks are never automatically stolen or deleted**, even if old or apparently associated with a dead process. Subsequent operations fail after the wait deadline.
+
+To recover a stale lock, stop **all processes** using this store, preserve private copies of the key/data/backup and any temporary files, and verify the matching key and every stored value in an isolated copy **without copying `.lsec.lock`**. If `master.key.bak` exists, follow the rotation recovery procedure below; do not blindly copy it over the current key. Once the key/data pair is verified and any restoration is complete, remove only the empty `.lsec.lock` directory with `rmdir`, verify all values in the live store, and only then remove a recovery backup and resume operations. Never remove an active owner's lock. If the lock directory is not empty or the files cannot be verified, preserve them and investigate.
+
+This coordination applies to cooperating processes running this version on a local filesystem. Avoid simultaneous use with older versions or direct file editors. Distributed/network filesystems and durable transactions across power loss are outside this guarantee.
+
 ## Rotating master.key
 
 `lsec rotate-key` (or, on the library side, `SecretStore#rotateMasterKey()` / `rotateMasterKey()`) generates a new `master.key` and re-encrypts every value in `global` and all `namespace`s with the new key.
 
-- **Existing instances**: After a rotation by another instance or the CLI completes successfully, existing `SecretStore` instances and the default-instance functions use the current key on their next read, write, or rotation. Coordinate access so no other operation runs during rotation; reloading the key does not make concurrent operations safe.
+- **Existing instances**: After a rotation by another instance or the CLI completes successfully, existing `SecretStore` instances and the default-instance functions use the current key on their next read, write, or rotation. All store operations, including reads, hold the same lock throughout rotation so the key and ciphertext stay consistent.
 - **Before persistence**: All values are decrypted and re-encrypted in memory first. A decryption failure raises `CryptoError` without changing the key, data, or backup.
 - **Persistence order**: (1) exclusively create `master.key.bak` from the valid current key → (2) replace `master.key` by rename → (3) replace `secrets.json` by rename → (4) remove the backup. These two file replacements are not one transaction. A failure between (2) and (3) leaves old data requiring the backup key. A failure after (3), including backup removal failure, leaves new data requiring the current key. Cleanup failure raises `StoreError` explicitly stating that the new key and data were saved.
 - **Recovery pending**: Any remaining `master.key.bak` path (including an invalid file, directory, or dangling symlink) blocks `set`, `delete`, `deleteNamespace`, and `rotateMasterKey` with `StoreError`, including deletion of missing entries. This applies to existing instances, new instances, and subsequent CLI processes. The backup is never overwritten on retry. Reads use the current on-disk key while recovery is pending; they do not fall back to the backup or a cached old key, and a missing current key is not regenerated. `has`, `list`, and `namespaces` remain available. There is no automatic rollback or backup deletion on failure.
@@ -406,9 +418,9 @@ Key names and namespace names are stored in plaintext; **only the values** are e
 For manual recovery after a failed or interrupted rotation:
 
 1. Stop **all processes** using the store. Preserve private copies of `master.key`, `secrets.json`, and `master.key.bak` wherever present before changing anything. Keep these originals separate from the working copies used below; retain file permissions (`0o600` for keys/data, `0o700` for directories).
-2. In an **isolated copy**, verify that the current `master.key` is 32 bytes and decrypts **every value in global and every namespace**. The example below performs this check without printing plaintext. If all values decrypt, keep that key: rotation may have completed and only cleanup failed. One successful `get` is insufficient.
+2. In an **isolated copy without `.lsec.lock`**, verify that the current `master.key` is 32 bytes and decrypts **every value in global and every namespace**. The example below performs this check without printing plaintext. If all values decrypt, keep that key: rotation may have completed and only cleanup failed. One successful `get` is insufficient.
 3. Only if the current key cannot decrypt all values, test a separate isolated copy with the valid 32-byte backup copied to its `master.key`. Verify every value again. If neither key decrypts all values, preserve all files and investigate; do not overwrite the live key or remove the backup. An empty store cannot identify a key generation by decryption, so retain a valid current key when one exists.
-4. Restore the verified matching key/data pair, preserving the original copies. Verify every value again at the actual store path while all other processes remain stopped. Only then explicitly remove `master.key.bak` from that store and resume updates or `rotate-key`.
+4. Restore the verified matching key/data pair, preserving the original copies. If a lock remains after all store users have stopped, remove only the empty `.lsec.lock` directory with `rmdir`. Verify every value again at the actual store path while all other processes remain stopped. Only then explicitly remove `master.key.bak` from that store and resume updates or `rotate-key`.
 
 Example verification, run from a project with the npm package `lsec` installed (set `RECOVERY_DIR` to the isolated copy, or to the restored store for the final verification):
 

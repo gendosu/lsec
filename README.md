@@ -38,7 +38,9 @@ We recommend downloading a prebuilt binary from GitHub Releases. Node.js is not 
 
 #### One-liner install (recommended)
 
-On macOS (Apple Silicon / Intel) and Linux (x86_64 / arm64), a single line installs the CLI. It detects your OS/CPU, downloads the latest release binary, verifies its SHA256 checksum, and places it at `~/.local/bin/lsec` (available while the repository and its releases are publicly accessible).
+On macOS (Apple Silicon / Intel) and Linux (x86_64 / arm64), a single line installs the CLI. It detects your OS/CPU, downloads the latest release binary, verifies its SHA256 checksum and checks that `--version` succeeds before placing it at `~/.local/bin/lsec` (available while the repository and its releases are publicly accessible).
+
+The installer stages and validates the binary in the destination directory, then replaces the executable in a single rename. If downloading, verification, or replacement fails, the existing executable is preserved. Temporary files are cleaned up on normal exit, failure, and interruption by INT or TERM.
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/gendosu/lsec/main/install.sh | sh

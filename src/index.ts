@@ -22,7 +22,7 @@
  * parsing (`isSecretRef` / `parseSecretRef`), the minimal `.env` parser
  * (`parseEnvFile`), and env-map resolution and validation (`resolveEnv` /
  * `validateRunEnv`). src/cli.ts only
- * imports this module and ./prompt.js (never secret-store.ts / crypto.ts /
+ * imports this module and CLI helpers (never secret-store.ts / crypto.ts /
  * store-file.ts / paths.ts / secret-ref.ts / env-file.ts / run-env.ts
  * directly), so these are re-exported here for that command to use.
  */

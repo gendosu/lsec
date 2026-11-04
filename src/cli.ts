@@ -12,13 +12,12 @@
  * isolation, and for anyone who wants a non-default configDir) are only
  * available on the class, not on the default-instance sugar functions.
  */
-import { spawn } from 'node:child_process';
 import { readFileSync } from 'node:fs';
-import { constants as osConstants } from 'node:os';
 import { Command } from 'commander';
 import pkg from '../package.json' with { type: 'json' };
 import { formatSecretRef, parseEnvFile, resolveEnv, validateRunEnv, SecretStore, type EnvFileEntry } from './index.js';
 import { promptConfirm, promptHiddenPassword } from './prompt.js';
+import { runChildProcess } from './run-child-process.js';
 
 /**
  * Environment variable used to override the configDir used by every command
@@ -73,33 +72,6 @@ async function resolveSetValue(useStdin: boolean): Promise<string> {
 function printError(err: unknown): void {
   const message = err instanceof Error ? err.message : String(err);
   process.stderr.write(`Error: ${message}\n`);
-}
-
-/**
- * Spawns `command` with `args`, using `env` as the child's *entire*
- * environment (nothing is inherited implicitly — `run`'s caller already
- * folded every pass-through `process.env` entry into `env` via {@link
- * resolveEnv}) and inheriting stdio, so interactive/TTY-aware commands
- * (pagers, prompts, etc.) behave the same as if run directly in the shell.
- *
- * Resolves to the exit code to propagate to the parent process: the
- * child's own exit code, or `128 + <signal number>` if it was killed by a
- * signal (the common shell/`op run` convention), or `1` if neither is
- * available. Rejects if the child could not be spawned at all (e.g. the
- * command does not exist).
- */
-function runChildProcess(command: string, args: string[], env: Record<string, string>): Promise<number> {
-  return new Promise((resolve, reject) => {
-    const child = spawn(command, args, { stdio: 'inherit', env });
-    child.on('error', reject);
-    child.on('close', (code, signal) => {
-      if (signal) {
-        resolve(128 + (osConstants.signals[signal] ?? 0));
-      } else {
-        resolve(code ?? 1);
-      }
-    });
-  });
 }
 
 const program = new Command();

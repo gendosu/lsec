@@ -27,11 +27,11 @@ export class SecretNotFoundError extends Error {
 }
 
 /**
- * Error thrown when secrets.json is corrupt, fails to parse, or fails to write.
+ * Error thrown for store persistence failures or pending rotation recovery.
  */
 export class StoreError extends Error {
-  constructor(message: string) {
-    super(message);
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, options);
     this.name = 'StoreError';
   }
 }

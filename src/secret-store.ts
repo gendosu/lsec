@@ -10,10 +10,12 @@
  * it does not touch node:fs/node:crypto directly.
  */
 import {
+  assertNoMasterKeyBackup,
   backupMasterKey,
   decrypt,
   encrypt,
   generateMasterKey,
+  hasMasterKeyBackup,
   loadOrCreateMasterKey,
   removeMasterKeyBackup,
   writeMasterKeyAtomic,
@@ -50,13 +52,24 @@ export class SecretStore {
 
   /**
    * Lazily loads (or creates, on first use) the master key for this
-   * instance's `configDir`, caching it for the lifetime of the instance.
+   * instance's `configDir`. Recovery checks invalidate the cache so reads
+   * reflect the current on-disk key while a backup remains.
    */
   private getMasterKey(): Buffer {
+    if (hasMasterKeyBackup(this.configDir)) this.masterKey = undefined;
     if (!this.masterKey) {
       this.masterKey = loadOrCreateMasterKey(this.configDir);
     }
     return this.masterKey;
+  }
+
+  private assertWritable(): void {
+    try {
+      assertNoMasterKeyBackup(this.configDir);
+    } catch (err) {
+      this.masterKey = undefined;
+      throw err;
+    }
   }
 
   /**
@@ -79,6 +92,7 @@ export class SecretStore {
 
   /** Encrypts `value` and stores it under `key`, overwriting any previous value. */
   set(key: string, value: string, opts?: SecretOpts): void {
+    this.assertWritable();
     const data = readStoreFile(this.configDir);
     const encrypted = encrypt(value, this.getMasterKey());
     const namespace = opts?.namespace;
@@ -126,6 +140,7 @@ export class SecretStore {
 
   /** Removes `key` if it is registered, returning whether it was removed. */
   delete(key: string, opts?: SecretOpts): boolean {
+    this.assertWritable();
     const data = readStoreFile(this.configDir);
     const container = this.getContainer(data, opts?.namespace);
     if (container?.[key] === undefined) {
@@ -155,6 +170,7 @@ export class SecretStore {
    * way to bulk-delete `global` through this method.
    */
   deleteNamespace(namespace: string): boolean {
+    this.assertWritable();
     const data = readStoreFile(this.configDir);
     if (!Object.prototype.hasOwnProperty.call(data.namespaces, namespace)) {
       return false;
@@ -169,7 +185,7 @@ export class SecretStore {
    * atomically replaces master.key with the new key. Returns the number of
    * values that were re-encrypted.
    *
-   * All-or-nothing: every value is decrypted with the current key and
+   * Before persistence, every value is decrypted with the current key and
    * re-encrypted with the new key entirely in memory first. If any value
    * fails to decrypt, the {@link CryptoError} propagates and nothing on disk
    * is touched.
@@ -179,9 +195,12 @@ export class SecretStore {
    * then the re-encrypted secrets.json is atomically written, then
    * master.key.bak is removed. A crash between the second and third steps
    * leaves master.key.bak holding the key that still decrypts the on-disk
-   * secrets.json — restore it over master.key to recover.
+   * secrets.json. A later crash can leave only cleanup pending instead.
+   * While the backup remains, updates are refused; verify every value with
+   * the matching key before removing it (see README recovery steps).
    */
   rotateMasterKey(): number {
+    this.assertWritable();
     const data = readStoreFile(this.configDir);
     const currentKey = this.getMasterKey();
     const newKey = generateMasterKey();
@@ -210,18 +229,27 @@ export class SecretStore {
     }
     const newData: StoreData = { version: 1, global: newGlobal, namespaces: newNamespaces };
 
-    const backupPath = backupMasterKey(this.configDir);
-    writeMasterKeyAtomic(this.configDir, newKey);
+    let stage = 'backup creation';
     try {
+      backupMasterKey(this.configDir);
+      stage = 'master.key replacement';
+      writeMasterKeyAtomic(this.configDir, newKey);
+      stage = 'secrets.json persistence';
       writeStoreFile(this.configDir, newData);
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
+      stage = 'backup cleanup';
+      removeMasterKeyBackup(this.configDir);
+    } catch (cause) {
+      this.masterKey = undefined;
+      const saved = stage === 'backup cleanup'
+        ? 'The new master.key and secrets.json were saved; backup cleanup failed. '
+        : '';
       throw new StoreError(
-        `master.key was rotated but secrets.json could not be re-encrypted (${msg}). ` +
-          `The previous key was preserved at ${backupPath}; restore it to master.key to recover access to the existing secrets.json, then retry rotate-key.`
+        `Rotation failed during ${stage} at ${this.configDir}. ${saved}` +
+        'Preserve master.key, secrets.json and any master.key.bak; recovery verification is required ' +
+        'before removing the backup or retrying updates (see README recovery steps).',
+        { cause }
       );
     }
-    removeMasterKeyBackup(this.configDir);
 
     this.masterKey = newKey;
     return reencryptedCount;

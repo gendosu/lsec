@@ -14,7 +14,7 @@
 import * as crypto from 'node:crypto';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { CryptoError } from './errors.js';
+import { CryptoError, StoreError } from './errors.js';
 import { ensureConfigDir } from './paths.js';
 
 /** AES-256 key size in bytes. */
@@ -26,6 +26,40 @@ export const TAG_BYTES = 16;
 
 const MASTER_KEY_FILE_NAME = 'master.key';
 const MASTER_KEY_BACKUP_FILE_NAME = 'master.key.bak';
+
+/** A backup path of any kind requires recovery, including a dangling symlink. */
+export function hasMasterKeyBackup(configDir: string): boolean {
+  const backupPath = path.join(configDir, MASTER_KEY_BACKUP_FILE_NAME);
+  try {
+    fs.lstatSync(backupPath);
+    return true;
+  } catch (cause) {
+    if ((cause as NodeJS.ErrnoException).code === 'ENOENT') return false;
+    throw new StoreError(`Cannot check rotation recovery backup at ${backupPath}.`, { cause });
+  }
+}
+
+/** Prevents updates until the preserved key/data have been verified manually. */
+export function assertNoMasterKeyBackup(configDir: string): void {
+  if (hasMasterKeyBackup(configDir)) {
+    throw new StoreError(
+      `Rotation recovery required at ${configDir}: master.key.bak exists. ` +
+      'Updates are blocked. Preserve master.key, secrets.json and master.key.bak; ' +
+      'verify every value with the matching key before removing the backup (see README recovery steps).'
+    );
+  }
+}
+
+function loadMasterKey(configDir: string): Buffer {
+  const keyPath = path.join(configDir, MASTER_KEY_FILE_NAME);
+  const key = fs.readFileSync(keyPath);
+  if (key.length !== KEY_BYTES) {
+    throw new CryptoError(
+      `master.key at ${keyPath} is corrupt (expected ${KEY_BYTES} bytes, got ${key.length}).`
+    );
+  }
+  return key;
+}
 
 /**
  * Loads the master key from `<configDir>/master.key`, generating and
@@ -40,14 +74,9 @@ const MASTER_KEY_BACKUP_FILE_NAME = 'master.key.bak';
 export function loadOrCreateMasterKey(configDir: string): Buffer {
   const keyPath = path.join(configDir, 'master.key');
   if (fs.existsSync(keyPath)) {
-    const key = fs.readFileSync(keyPath);
-    if (key.length !== KEY_BYTES) {
-      throw new CryptoError(
-        `master.key at ${keyPath} is corrupt (expected ${KEY_BYTES} bytes, got ${key.length}).`
-      );
-    }
-    return key;
+    return loadMasterKey(configDir);
   }
+  assertNoMasterKeyBackup(configDir);
   ensureConfigDir(configDir);
   const key = crypto.randomBytes(KEY_BYTES);
   fs.writeFileSync(keyPath, key, { mode: 0o600 });
@@ -119,29 +148,35 @@ export function writeMasterKeyAtomic(configDir: string, key: Buffer): void {
 }
 
 /**
- * Copies the current `<configDir>/master.key` to `master.key.bak`, so the
+ * Exclusively creates `master.key.bak` from the valid current key, so the
  * pre-rotation key can be recovered if a crash occurs between {@link
  * writeMasterKeyAtomic} replacing master.key and secrets.json being
  * re-encrypted under the new key. Returns the backup's path.
  */
 export function backupMasterKey(configDir: string): string {
-  const keyPath = path.join(configDir, MASTER_KEY_FILE_NAME);
+  const key = loadMasterKey(configDir);
   const backupPath = path.join(configDir, MASTER_KEY_BACKUP_FILE_NAME);
-  fs.copyFileSync(keyPath, backupPath);
-  fs.chmodSync(backupPath, 0o600);
+  const fd = fs.openSync(backupPath, 'wx', 0o600);
+  try {
+    fs.writeFileSync(fd, key);
+    fs.fchmodSync(fd, 0o600);
+  } finally {
+    // Keep even a partial backup: the unchanged current key remains valid,
+    // and removing a path here could discard recovery evidence.
+    fs.closeSync(fd);
+  }
   return backupPath;
 }
 
 /**
- * Removes `<configDir>/master.key.bak` if present. Best-effort: failures
- * (e.g. it was already removed) are ignored, mirroring the cleanup pattern
- * in {@link writeMasterKeyAtomic}.
+ * Removes `<configDir>/master.key.bak` if present. Only ENOENT is ignored;
+ * other failures must leave the store in recovery mode.
  */
 export function removeMasterKeyBackup(configDir: string): void {
   const backupPath = path.join(configDir, MASTER_KEY_BACKUP_FILE_NAME);
   try {
     fs.unlinkSync(backupPath);
-  } catch {
-    // best-effort cleanup; ignore failures (e.g. it was never created)
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
   }
 }

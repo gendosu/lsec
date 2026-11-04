@@ -42,21 +42,17 @@ export interface SecretOpts {
  */
 export class SecretStore {
   private readonly configDir: string;
-  private masterKey: Buffer | undefined;
 
   constructor(options?: SecretStoreOptions) {
     this.configDir = resolveConfigDir(options);
   }
 
   /**
-   * Lazily loads (or creates, on first use) the master key for this
-   * instance's `configDir`, caching it for the lifetime of the instance.
+   * Loads the current key on demand so completed rotations by another
+   * instance or process are visible to the next operation.
    */
   private getMasterKey(): Buffer {
-    if (!this.masterKey) {
-      this.masterKey = loadOrCreateMasterKey(this.configDir);
-    }
-    return this.masterKey;
+    return loadOrCreateMasterKey(this.configDir);
   }
 
   /**
@@ -223,7 +219,6 @@ export class SecretStore {
     }
     removeMasterKeyBackup(this.configDir);
 
-    this.masterKey = newKey;
     return reencryptedCount;
   }
 }

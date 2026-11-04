@@ -1,7 +1,7 @@
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { decrypt, encrypt } from '../src/crypto.js';
 import { CryptoError, SecretNotFoundError } from '../src/errors.js';
 import { SecretStore } from '../src/secret-store.js';
@@ -128,7 +128,7 @@ describe('set / get', () => {
     expect(store.get('token', { namespace: 'aws' })).toBe('aws-value');
   });
 
-  it('reuses the same master key across multiple calls on the same instance (instance-level cache)', () => {
+  it('keeps the master key unchanged across ordinary set/get calls', () => {
     const { store, configDir } = makeStore();
 
     store.set('a', '1');
@@ -137,8 +137,6 @@ describe('set / get', () => {
     const keyAfterSecondSet = fs.readFileSync(path.join(configDir, 'master.key'));
 
     expect(keyAfterSecondSet.equals(keyAfterFirstSet)).toBe(true);
-    // Both values set on the same instance must still decrypt correctly with
-    // that single cached key.
     expect(store.get('a')).toBe('1');
     expect(store.get('b')).toBe('2');
   });
@@ -587,7 +585,7 @@ describe('rotateMasterKey', () => {
     expect(reader.get('b', { namespace: 'ns' })).toBe('2');
   });
 
-  it('updates the instance-level master key cache so subsequent set/get use the new key', () => {
+  it('uses the new key for subsequent set/get after rotating on the same instance', () => {
     const { store } = makeStore();
     store.set('a', '1');
 
@@ -612,7 +610,7 @@ describe('rotateMasterKey', () => {
     store.set('a', '1');
     store.set('b', '2');
     // Corrupt one value directly on disk so it can no longer be decrypted
-    // with the store's cached master key.
+    // with the current master key.
     const data = readStoreFile(configDir);
     data.global['b'] = encrypt('2', Buffer.alloc(32, 9));
     writeStoreFile(configDir, data);
@@ -624,5 +622,137 @@ describe('rotateMasterKey', () => {
     expect(fs.readFileSync(path.join(configDir, 'master.key')).equals(keyBefore)).toBe(true);
     expect(fs.existsSync(path.join(configDir, 'master.key.bak'))).toBe(false);
     expect(store.get('a')).toBe('1');
+  });
+});
+
+describe.each([undefined, 'work'])('external rotation (namespace: %s)', (namespace) => {
+  const opts = { namespace };
+  let store: SecretStore;
+  let other: SecretStore;
+  let configDir: string;
+
+  beforeEach(() => {
+    ({ store, configDir } = makeStore());
+    store.set('original', 'original-value', opts);
+    store.set('untouched', 'untouched-value', opts);
+    other = new SecretStore({ configDir });
+    expect(other.get('original', opts)).toBe('original-value');
+    expect(other.rotateMasterKey()).toBe(2);
+  });
+
+  it.each(['get', 'tryGet'] as const)('%s reads with the externally rotated key', (method) => {
+    expect(store[method]('original', opts)).toBe('original-value');
+    expect(new SecretStore({ configDir }).get('original', opts)).toBe('original-value');
+  });
+
+  it.each(['later', 'original'])('set(%s) as the first operation uses the current key', (key) => {
+    store.set(key, 'updated-value', opts);
+
+    for (const reader of [store, other, new SecretStore({ configDir })]) {
+      expect(reader.get(key, opts)).toBe('updated-value');
+      expect(reader.get('original', opts)).toBe(key === 'original' ? 'updated-value' : 'original-value');
+      expect(reader.get('untouched', opts)).toBe('untouched-value');
+    }
+  });
+
+  it('rotateMasterKey as the first operation uses the current key', () => {
+    expect(store.rotateMasterKey()).toBe(2);
+
+    for (const reader of [store, other, new SecretStore({ configDir })]) {
+      expect(reader.get('original', opts)).toBe('original-value');
+      expect(reader.get('untouched', opts)).toBe('untouched-value');
+    }
+    expect(fs.existsSync(path.join(configDir, 'master.key.bak'))).toBe(false);
+  });
+});
+
+describe('master key changes between operations', () => {
+  it('supports alternating rotations on two previously used instances', () => {
+    const { store, configDir } = makeStore();
+    store.set('global', 'global-value');
+    store.set('token', 'work-value', { namespace: 'work' });
+    const other = new SecretStore({ configDir });
+    expect(other.get('global')).toBe('global-value');
+
+    for (const rotator of [other, store, other, store]) {
+      expect(rotator.rotateMasterKey()).toBe(2);
+      for (const reader of [store, other, new SecretStore({ configDir })]) {
+        expect(reader.get('global')).toBe('global-value');
+        expect(reader.get('token', { namespace: 'work' })).toBe('work-value');
+      }
+      expect(fs.existsSync(path.join(configDir, 'master.key.bak'))).toBe(false);
+    }
+  });
+
+  it('uses the current key when an empty store was externally rotated', () => {
+    const { store, configDir } = makeStore();
+    store.set('bootstrap', 'value');
+    store.delete('bootstrap');
+    expect(new SecretStore({ configDir }).rotateMasterKey()).toBe(0);
+
+    store.set('later', 'later-value');
+
+    expect(store.get('later')).toBe('later-value');
+    expect(new SecretStore({ configDir }).get('later')).toBe('later-value');
+  });
+
+  it('keeps stores in different configDirs independent of external rotation', () => {
+    const first = makeStore();
+    const second = makeStore();
+    first.store.set('key', 'first');
+    second.store.set('key', 'second');
+    const secondKey = fs.readFileSync(path.join(second.configDir, 'master.key'));
+
+    new SecretStore({ configDir: first.configDir }).rotateMasterKey();
+    second.store.set('later', 'second-later');
+
+    expect(first.store.get('key')).toBe('first');
+    expect(fs.readFileSync(path.join(second.configDir, 'master.key'))).toEqual(secondKey);
+    const reader = new SecretStore({ configDir: second.configDir });
+    expect(reader.get('key')).toBe('second');
+    expect(reader.get('later')).toBe('second-later');
+  });
+
+  it.each(['invalid size', 'read failure'])('rejects set before saving on key %s and recovers after repair', (failure) => {
+    const { store, configDir } = makeStore();
+    store.set('original', 'original-value');
+    const keyPath = path.join(configDir, 'master.key');
+    const key = fs.readFileSync(keyPath);
+    const secretsPath = path.join(configDir, 'secrets.json');
+    const contents = fs.readFileSync(secretsPath);
+    fs.unlinkSync(keyPath);
+    if (failure === 'invalid size') {
+      fs.writeFileSync(keyPath, Buffer.alloc(1), { mode: 0o600 });
+    } else {
+      fs.mkdirSync(keyPath);
+    }
+
+    expect(() => store.set('later', 'later-value')).toThrow(
+      failure === 'invalid size' ? /master.key.*corrupt/ : /EISDIR/
+    );
+    expect(fs.readFileSync(secretsPath)).toEqual(contents);
+
+    fs.rmSync(keyPath, { recursive: true });
+    fs.writeFileSync(keyPath, key, { mode: 0o600 });
+    store.set('later', 'later-value');
+    for (const reader of [store, new SecretStore({ configDir })]) {
+      expect(reader.get('original')).toBe('original-value');
+      expect(reader.get('later')).toBe('later-value');
+    }
+  });
+
+  it('does not load or create a key for missing values or metadata-only operations', () => {
+    const { store, configDir } = makeStore();
+
+    for (const opts of [undefined, { namespace: 'missing' }]) {
+      expect(store.tryGet('missing', opts)).toBeUndefined();
+      expect(() => store.get('missing', opts)).toThrow(SecretNotFoundError);
+      expect(store.has('missing', opts)).toBe(false);
+      expect(store.list(opts)).toEqual([]);
+      expect(store.delete('missing', opts)).toBe(false);
+    }
+    expect(store.namespaces()).toEqual([]);
+    expect(store.deleteNamespace('missing')).toBe(false);
+    expect(fs.readdirSync(configDir)).toEqual([]);
   });
 });

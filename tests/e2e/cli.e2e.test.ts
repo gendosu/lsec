@@ -235,6 +235,57 @@ describe('lsec CLI (e2e)', () => {
     expect(result.stderr).toContain('0');
   });
 
+  it.each(['get', 'tryGet', 'set', 'rotateMasterKey'] as const)(
+    'CLI のローテーション後、既存ライブラリの最初の %s が現行鍵に追従する',
+    async (firstOperation) => {
+      const { SecretStore } = await import('../../dist/index.js');
+      const { readFileSync, existsSync } = await import('node:fs');
+      const { join } = await import('node:path');
+      const store = new SecretStore({ configDir });
+      store.set('original', 'global-value');
+      store.set('token', 'work-value', { namespace: 'work' });
+      const keyBefore = readFileSync(join(configDir, 'master.key'));
+
+      const rotation = await runCli(['rotate-key', '--yes'], configDir);
+      expect(rotation.exitCode).toBe(0);
+      expect(rotation.stderr).toContain('re-encrypted 2 secret(s).');
+      expect(readFileSync(join(configDir, 'master.key')).equals(keyBefore)).toBe(false);
+      expect(existsSync(join(configDir, 'master.key.bak'))).toBe(false);
+
+      switch (firstOperation) {
+        case 'get':
+          expect(store.get('original')).toBe('global-value');
+          break;
+        case 'tryGet':
+          expect(store.tryGet('token', { namespace: 'work' })).toBe('work-value');
+          break;
+        case 'set':
+          store.set('later', 'later-value');
+          break;
+        case 'rotateMasterKey':
+          expect(store.rotateMasterKey()).toBe(2);
+          break;
+      }
+
+      expect(store.get('original')).toBe('global-value');
+      expect(store.tryGet('token', { namespace: 'work' })).toBe('work-value');
+      store.set('later', 'later-value');
+      store.set('token', 'updated-work-value', { namespace: 'work' });
+      const reader = new SecretStore({ configDir });
+      for (const [key, value, namespace] of [
+        ['original', 'global-value', undefined],
+        ['later', 'later-value', undefined],
+        ['token', 'updated-work-value', 'work'],
+      ] as const) {
+        expect(reader.get(key, { namespace })).toBe(value);
+        const args = ['get', key, ...(namespace ? ['--ns', namespace] : [])];
+        const result = await runCli(args, configDir);
+        expect(result.exitCode).toBe(0);
+        expect(result.stdout).toBe(value);
+      }
+    }
+  );
+
   it('非TTY で --yes を付けない rotate-key はエラーで非ゼロ終了する（ハングしない）', async () => {
     await runCli(['set', 'api_key', '--stdin'], configDir, 'sekret-value');
 

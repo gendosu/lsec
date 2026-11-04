@@ -398,6 +398,7 @@ key 名・namespace 名は平文で保存され、**値のみ**が AES-256-GCM �
 
 `lsec rotate-key`（ライブラリ側は `SecretStore#rotateMasterKey()` / `rotateMasterKey()`）で、新しい `master.key` を生成し、`global` と全 `namespace` の値をすべて新しい鍵で再暗号化できます。
 
+- **既存インスタンスの継続利用**: 別インスタンスや CLI のローテーションが正常完了した後は、既存の `SecretStore` インスタンスと既定インスタンスの関数も、次の読み取り・書き込み・ローテーションで現行鍵を使います。ローテーション中にほかの操作が走らないよう利用側で調整してください。鍵の再読み込みだけでは同時操作の安全性を保証しません。
 - **all-or-nothing**: 現行鍵での復号は書き込み前にすべてメモリ上で完了させます。1件でも復号に失敗した場合（`master.key` の破損など）は `CryptoError` を投げて中断し、ディスク上の `master.key` / `secrets.json` は一切変更されません。
 - **書き込み順序（クラッシュ耐性）**: (1) 現行 `master.key` を `master.key.bak` としてコピー → (2) 新しい鍵を `master.key` に原子的に書き込み（rename） → (3) 再暗号化済みの `secrets.json` を原子的に書き込み → (4) 成功したら `master.key.bak` を削除。2つのファイルにまたがる完全な原子性は実現できないため、(2) と (3) の間でプロセスがクラッシュした場合、`master.key` は新しい鍵に置き換わっているのに `secrets.json` はまだ旧鍵で暗号化されたまま、という状態が起こり得ます。この場合は **`master.key.bak` を `master.key` に上書きコピーして旧鍵を復元してください**。復元後は既存の `secrets.json` を通常どおり復号でき、`rotate-key` を再実行できます。
 

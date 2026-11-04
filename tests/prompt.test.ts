@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest';
-import { PassThrough } from 'node:stream';
+import { describe, expect, it, vi } from 'vitest';
+import { PassThrough, Writable } from 'node:stream';
 import { promptConfirm, promptHiddenPassword } from '../src/prompt.js';
 
 /**
@@ -79,6 +79,269 @@ describe('promptHiddenPassword', () => {
     expect(result).toBe('mysecret');
     expect(echoed).not.toContain('mysecret');
     expect(echoed).toContain('Enter secret value: ');
+  });
+});
+
+describe.each([
+  ['hidden', promptHiddenPassword],
+  ['confirmation', promptConfirm],
+] as const)('%s prompt lifecycle', (_name, prompt) => {
+  function streams(raw = false) {
+    const input = Object.assign(new PassThrough(), {
+      isRaw: raw,
+      setRawMode: vi.fn(function (this: { isRaw: boolean }, mode: boolean) {
+        this.isRaw = mode;
+      }),
+    });
+    const output = new PassThrough();
+    output.resume();
+    return { input, output };
+  }
+
+  async function within(promise: Promise<unknown>): Promise<unknown> {
+    let timer: ReturnType<typeof setTimeout>;
+    const deadline = new Promise<never>((_resolve, reject) => {
+      timer = setTimeout(() => reject(new Error('Prompt did not settle')), 200);
+    });
+    try {
+      return await Promise.race([promise, deadline]);
+    } finally {
+      clearTimeout(timer!);
+    }
+  }
+
+  const interruptions = [
+    ['EOF', (input: PassThrough) => input.end(), 1],
+    ['Ctrl-D', (input: PassThrough) => input.write('\x04'), 1],
+    ['Ctrl-C', (input: PassThrough) => input.write('\x03'), 130],
+    ['partial input then EOF', (input: PassThrough) => input.end('y-sensitive-dummy'), 1],
+    ['partial input then Ctrl-C', (input: PassThrough) => input.write('y-sensitive-dummy\x03'), 130],
+    ['destroy', (input: PassThrough) => input.destroy(), 1],
+    ['input close', (input: PassThrough) => input.emit('close'), 1],
+    ['input error', (input: PassThrough) => input.destroy(new Error('sensitive-dummy')), 1],
+  ] as const;
+
+  it.each(interruptions)('rejects on %s and restores the terminal', async (_label, interrupt, exitCode) => {
+    const { input, output } = streams();
+    const result = within(prompt('Question? ', input, output));
+    const check = expect(result).rejects.toMatchObject({ exitCode });
+    interrupt(input);
+    try {
+      await check;
+      expect(input.isRaw).toBe(false);
+      // Successful writes may still have callbacks queued after cancellation.
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(input.listenerCount('keypress')).toBe(0);
+      expect(input.listenerCount('end')).toBe(0);
+      expect(input.listenerCount('error')).toBe(0);
+      expect(output.listenerCount('error')).toBe(0);
+      expect(output.listenerCount('resize')).toBe(0);
+      expect(output.destroyed).toBe(false);
+    } finally {
+      input.destroy();
+      output.destroy();
+    }
+  });
+
+  it.each(['ended', 'destroyed'] as const)('rejects an already %s input', async (state) => {
+    const { input, output } = streams();
+    if (state === 'ended') {
+      input.resume();
+      input.end();
+      await new Promise<void>((resolve) => input.once('end', resolve));
+    } else {
+      input.destroy();
+    }
+    await expect(within(prompt('Question? ', input, output))).rejects.toMatchObject({ exitCode: 1 });
+    expect(input.isRaw).toBe(false);
+  });
+
+  it('preserves a completed answer followed immediately by EOF', async () => {
+    const { input, output } = streams();
+    const result = within(prompt('Question? ', input, output));
+    input.end('yes\n');
+    expect(await result).toBe(_name === 'hidden' ? 'yes' : true);
+    expect(input.isRaw).toBe(false);
+  });
+
+  it('preserves external listeners and the original raw state across repeated prompts', async () => {
+    const { input, output } = streams(true);
+    const external = vi.fn();
+    input.on('error', external);
+    input.on('end', external);
+    output.on('error', external);
+    output.on('resize', external);
+    for (let i = 0; i < 3; i++) {
+      const result = within(prompt('Question? ', input, output));
+      input.write('yes\n');
+      expect(await result).toBe(_name === 'hidden' ? 'yes' : true);
+      expect(input.isRaw).toBe(true);
+      expect(input.listeners('error')).toEqual([external]);
+      expect(input.listeners('end')).toEqual([external]);
+      expect(output.listeners('error')).toEqual([external]);
+      expect(output.listeners('resize')).toEqual([external]);
+      expect(input.destroyed).toBe(false);
+    }
+    expect(external).not.toHaveBeenCalled();
+  });
+
+  it('keeps the first interruption when close and late answers follow', async () => {
+    const { input, output } = streams();
+    const result = within(prompt('Question? ', input, output));
+    input.write('\x03');
+    input.emit('close');
+    input.emit('end');
+    input.write('yes\n');
+    await expect(result).rejects.toMatchObject({ exitCode: 130 });
+  });
+
+  it('sanitizes output errors and restores raw mode', async () => {
+    const { input, output } = streams();
+    const result = within(prompt('Question? ', input, output));
+    output.emit('error', new Error('sensitive-dummy'));
+    await expect(result).rejects.toMatchObject({ exitCode: 1, message: 'Interactive prompt failed.' });
+    expect(input.isRaw).toBe(false);
+    expect(input.listenerCount('keypress')).toBe(0);
+  });
+
+  it('cleans up after a synchronous question write failure', async () => {
+    const { input, output } = streams();
+    vi.spyOn(output, 'write').mockImplementation(() => { throw new Error('sensitive-dummy'); });
+    await expect(within(prompt('Question? ', input, output))).rejects.toMatchObject({
+      exitCode: 1, message: 'Interactive prompt failed.',
+    });
+    expect(input.isRaw).toBe(false);
+    expect(input.listenerCount('keypress')).toBe(0);
+    expect(input.listenerCount('error')).toBe(0);
+    expect(output.listenerCount('resize')).toBe(0);
+  });
+
+  it('sanitizes synchronous output failure while editing an answer', async () => {
+    const { input, output } = streams();
+    const result = within(prompt('Question? ', input, output));
+    vi.spyOn(output, 'write').mockImplementation(() => { throw new Error('sensitive-dummy'); });
+    input.write('y\x7f');
+    await expect(result).rejects.toMatchObject({ exitCode: 1, message: 'Interactive prompt failed.' });
+    expect(input.isRaw).toBe(false);
+  });
+
+  it('sanitizes asynchronous output failure without an unhandled error', async () => {
+    const { input } = streams();
+    const output = new Writable({
+      write(_chunk, _encoding, callback) {
+        setImmediate(() => callback(new Error('sensitive-dummy')));
+      },
+    });
+    const result = within(prompt('Question? ', input, output));
+    input.write('yes\n');
+    await expect(result).rejects.toMatchObject({ exitCode: 1, message: 'Interactive prompt failed.' });
+    expect(input.isRaw).toBe(false);
+  });
+
+  it.each(['\x03', '\x04'])('handles a delayed output error after interruption %j', async (key) => {
+    const { input } = streams();
+    let failWrite: (error: Error) => void;
+    const output = new Writable({
+      write(_chunk, _encoding, callback) { failWrite = callback; },
+    });
+    const result = within(prompt('Question? ', input, output));
+    input.write(key);
+    await expect(result).rejects.toMatchObject({ exitCode: key === '\x03' ? 130 : 1 });
+    expect(input.isRaw).toBe(false);
+    failWrite!(new Error('sensitive-dummy'));
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(output.listenerCount('error')).toBe(0);
+    expect(input.listenerCount('error')).toBe(0);
+  });
+
+  it('cleans up the output error listener after delayed successful output following interruption', async () => {
+    const { input } = streams();
+    const writes: Array<(error?: Error) => void> = [];
+    const output = new Writable({
+      write(_chunk, _encoding, callback) { writes.push(callback); },
+    });
+    const result = within(prompt('Question? ', input, output));
+    input.write('\x03');
+    await expect(result).rejects.toMatchObject({ exitCode: 130 });
+    for (let index = 0; index < writes.length; index++) writes[index]();
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(output.listenerCount('error')).toBe(0);
+  });
+
+  it('handles input failure followed by a delayed failure of the final answer output', async () => {
+    const { input } = streams();
+    let failFinalWrite: (error: Error) => void;
+    const output = new Writable({
+      write(chunk, _encoding, callback) {
+        if (chunk.toString() === (_name === 'hidden' ? '\n' : '')) failFinalWrite = callback;
+        else callback();
+      },
+    });
+    const result = within(prompt('Question? ', input, output));
+    input.write('yes\n');
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(failFinalWrite!).toBeTypeOf('function');
+    input.emit('error', new Error('sensitive-input-dummy'));
+    await expect(result).rejects.toMatchObject({ exitCode: 1, message: 'Interactive prompt failed.' });
+    failFinalWrite!(new Error('sensitive-output-dummy'));
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(output.listenerCount('error')).toBe(0);
+    expect(input.isRaw).toBe(false);
+  });
+
+  it('cleans up after output closes before a delayed write callback fails', async () => {
+    const { input } = streams();
+    let failWrite: (error: Error) => void;
+    const output = new Writable({
+      write(_chunk, _encoding, callback) { failWrite = callback; },
+    });
+    const result = within(prompt('Question? ', input, output));
+    output.destroy();
+    await expect(result).rejects.toMatchObject({ exitCode: 1 });
+    failWrite!(new Error('sensitive-dummy'));
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(output.listenerCount('error')).toBe(0);
+    expect(output.listenerCount('close')).toBe(0);
+    expect(input.isRaw).toBe(false);
+  });
+
+  it('cleans up a partially initialized readline when enabling raw mode throws', async () => {
+    const { input, output } = streams();
+    input.setRawMode.mockImplementationOnce(() => { throw new Error('sensitive-dummy'); });
+    await expect(within(prompt('Question? ', input, output))).rejects.toMatchObject({
+      exitCode: 1, message: 'Interactive prompt failed.',
+    });
+    expect(input.isRaw).toBe(false);
+    expect(input.listenerCount('keypress')).toBe(0);
+    expect(input.listenerCount('error')).toBe(0);
+    expect(input.listenerCount('end')).toBe(0);
+  });
+
+  it.each(['ended', 'destroyed'] as const)('rejects an already %s output', async (state) => {
+    const { input, output } = streams();
+    if (state === 'ended') output.end();
+    else output.destroy();
+    await expect(within(prompt('Question? ', input, output))).rejects.toMatchObject({ exitCode: 1 });
+    expect(input.isRaw).toBe(false);
+  });
+
+  it.each(['end', 'destroy'] as const)('rejects when output.%s() closes the output during a prompt', async (method) => {
+    const { input, output } = streams();
+    const result = within(prompt('Question? ', input, output));
+    output[method]();
+    await expect(result).rejects.toMatchObject({ exitCode: 1 });
+    expect(input.isRaw).toBe(false);
+  });
+
+  it('restores raw mode even when initialization changes it before throwing', async () => {
+    const { input, output } = streams();
+    input.setRawMode.mockImplementationOnce(function (mode) {
+      input.isRaw = mode;
+      throw new Error('sensitive-dummy');
+    });
+    await expect(within(prompt('Question? ', input, output))).rejects.toMatchObject({ exitCode: 1 });
+    expect(input.isRaw).toBe(false);
+    expect(input.listenerCount('keypress')).toBe(0);
   });
 });
 

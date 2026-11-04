@@ -129,6 +129,8 @@ MISE_ACTIVATE_AGGRESSIVE=1 mise exec -- pnpm test:unit
 MISE_ACTIVATE_AGGRESSIVE=1 mise exec -- pnpm test:e2e
 ```
 
+対話 E2E テストには Python 3（`python3`）と POSIX の疑似端末（PTY）が必要です。CI は実行前に Python の利用可否を確認し、未導入の場合にテストを省略しません。
+
 `bin/lsec` に単一バイナリを生成し、起動確認と同じ E2E スイートをバイナリに対して実行します。
 
 ```bash
@@ -233,6 +235,8 @@ lsec run --dotenv .env -- npm run dev
 ```
 
 シェル履歴に値が残る `--value <v>` のようなオプションは提供していません。値は対話プロンプト（非表示）か `--stdin` のいずれかで渡してください。未登録の key を `get` した場合など、エラー時は stderr にメッセージを出力し非ゼロの終了コードで終了します。
+
+対話入力・確認中の Ctrl-C は終了コード 130、EOF（プロンプトを閉じる Ctrl-D を含む）や入出力障害は終了コード 1 で終了します。`set` の入力中断時は保存せず、`delete-namespace` / `rotate-key` の確認中断時は操作を実行しません。入力は Enter で確定するため、入力途中の値や `y` の後に EOF が来ても回答とは扱いません。明示的な否定や空の確認回答は、従来どおり `Aborted.` を表示して終了コード 0 でキャンセルします。
 
 ## ライブラリ API の使い方
 

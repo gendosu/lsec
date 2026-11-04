@@ -16,7 +16,7 @@ import { readFileSync } from 'node:fs';
 import { Command } from 'commander';
 import pkg from '../package.json' with { type: 'json' };
 import { formatSecretRef, parseEnvFile, resolveEnv, validateRunEnv, SecretStore, type EnvFileEntry } from './index.js';
-import { promptConfirm, promptHiddenPassword } from './prompt.js';
+import { PromptError, promptConfirm, promptHiddenPassword } from './prompt.js';
 import { runChildProcess } from './run-child-process.js';
 
 /**
@@ -307,5 +307,5 @@ program
 
 program.parseAsync(process.argv).catch((err: unknown) => {
   printError(err);
-  process.exit(1);
+  process.exitCode = err instanceof PromptError ? err.exitCode : 1;
 });

@@ -129,6 +129,8 @@ MISE_ACTIVATE_AGGRESSIVE=1 mise exec -- pnpm test:unit
 MISE_ACTIVATE_AGGRESSIVE=1 mise exec -- pnpm test:e2e
 ```
 
+The interactive E2E tests require Python 3 (`python3`) and a POSIX PTY. CI verifies Python availability before running these tests; they are not skipped when Python is missing.
+
 Build the single binary at `bin/lsec`, then check it and run the same E2E suite against it:
 
 ```bash
@@ -233,6 +235,8 @@ lsec run --dotenv .env -- npm run dev
 ```
 
 There is no `--value <v>`-style option, since that would leave the value in your shell history. Pass values either via the hidden interactive prompt or `--stdin`. On errors — such as `get`-ing an unregistered key — a message is printed to stderr and the process exits with a non-zero exit code.
+
+During interactive input or confirmation, Ctrl-C exits with code 130; EOF (including Ctrl-D when it closes the prompt) or an input/output failure exits with code 1. Interrupted `set` input is not saved, and interrupted `delete-namespace` / `rotate-key` confirmation does not perform the operation. Input is submitted only with Enter; a partial value or `y` followed by EOF does not count as an answer. An explicit negative or empty confirmation still prints `Aborted.` and exits with code 0.
 
 ## Library API Usage
 

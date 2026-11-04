@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Breaking**: Limit the Node.js library and Node.js CLI to `^22.12.0 || ^24.0.0 || ^26.0.0` (minimum versions: 22.12.0, 24.0.0, and 26.0.0). Drop support for EOL Node.js 20, 23, and 25 and exclude unverified future majors so the supported range matches the LTS lines we maintain and test. CI covers the minimum and latest release of each supported major. Prebuilt binaries are unaffected. This change is intended for the next minor release (0.6.0), not a 0.5.x patch release
+
 ## [0.5.1] - 2026-11-03
 
 ### Fixed

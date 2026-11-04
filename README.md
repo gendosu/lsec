@@ -490,6 +490,10 @@ If process startup fails, `run` exits with 1 and prints a fixed diagnostic, with
 
 The child process's exit code or signal propagates directly as `lsec run`'s own exit code (if terminated by a signal, it's `128 + signal number`).
 
+On Linux and macOS, `lsec run` forwards each `SIGTERM` or `SIGINT` it receives to its directly launched child and waits for that child to exit. With default signal handling, the resulting exit codes are 143 and 130 respectively. If the child handles the signal and exits with its own code after cleanup, that code is preserved. If it ignores the signal or keeps running, `lsec run` keeps waiting; it does not impose a timeout or escalate to `SIGKILL`. A failed signal delivery produces a fixed diagnostic without exposing arguments or environment values, and the child remains monitored.
+
+Terminal Ctrl-C can reach both parent and child through their shared foreground process group, so forwarding may deliver the signal again. Child cleanup handlers should tolerate repeated signals. Forwarding targets only the direct child: grandchildren launched by shells, npm, or other wrappers depend on the wrapper's own forwarding behavior. Daemonized processes, `SIGKILL` sent to lsec, and Windows signal behavior are outside this guarantee; stopping lsec does not guarantee that every descendant holding secrets has stopped.
+
 No output masking is performed (i.e., no redaction of secret values that leak into the child process's stdout/stderr). Because `stdio` is directly inherited by the child process, interactive commands (prompts, password entry, etc.) work as expected.
 
 ## The `LOCAL_SECRET_CONFIG_DIR` environment variable

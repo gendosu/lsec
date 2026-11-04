@@ -2,11 +2,11 @@
  * Resolves the full environment variable map for `lsec run`, combining the
  * two sources 1Password's `op run` also uses: the parent process's own
  * environment, and an optional `--dotenv` (this CLI's equivalent of `op
- * run`'s `--env-file`; see src/cli.ts for why the flag was renamed). Any
- * value that is a
- * `lsec://<namespace>/<key>` reference (see src/secret-ref.ts) is replaced
- * by its resolved secret value; every other value is passed through
- * unchanged.
+ * run`'s `--env-file`; see src/cli.ts for why the flag was renamed). Dotenv
+ * overrides are applied first, with the last entry for each key winning.
+ * Only the final values are resolved: a `lsec://<namespace>/<key>` reference
+ * (see src/secret-ref.ts) is replaced by its secret value; other values are
+ * passed through unchanged.
  *
  * This module is pure logic: it takes the resolution of an individual
  * reference as an injected `resolveSecret` callback rather than importing
@@ -22,17 +22,16 @@ import type { EnvFileEntry } from './env-file.js';
 export interface ResolveEnvOptions {
   /**
    * Candidate source #1 (op run's "environment"): typically `process.env`.
-   * Every entry is passed through as-is, except a value that parses as a
-   * `lsec://…` reference is replaced by `resolveSecret`'s result. Entries
-   * with an `undefined` value are skipped.
+   * Own entries with an `undefined` value are skipped. Values are resolved
+   * only if they remain after all `envFileEntries` overrides.
    */
   processEnv: Record<string, string | undefined>;
   /**
    * Candidate source #2 (`lsec run --dotenv`, op run's `--env-file`
    * equivalent): entries parsed by {@link parseEnvFile}, in file order.
-   * Overlaid on top of `processEnv` — a key present in both wins with the
-   * `--dotenv` value (after reference resolution, if applicable). Omit
-   * when `--dotenv` was not given.
+   * Overlaid on top of `processEnv` before reference resolution. The last
+   * entry for each key wins, including empty strings. Overwritten values
+   * are never parsed or resolved. Omit when `--dotenv` was not given.
    */
   envFileEntries?: EnvFileEntry[];
   /**
@@ -48,9 +47,9 @@ export interface ResolveEnvOptions {
 
 /**
  * Builds the full environment map to pass to the child process spawned by
- * `lsec run`. Never touches or validates a value that is not a secret
- * reference (`isSecretRef` returns `false`) — such values (from either
- * source) are copied through verbatim.
+ * `lsec run`. Applies all dotenv overrides before resolving the final
+ * values. Overwritten values are never parsed or resolved. Final values
+ * that are not secret references are copied through verbatim.
  *
  * If a value is a reference but fails to parse or resolve, the resulting
  * error is re-thrown wrapped with the environment variable's *name* (never
@@ -72,9 +71,12 @@ export function resolveEnv(options: ResolveEnvOptions): Record<string, string> {
 
   for (const [key, value] of Object.entries(processEnv)) {
     if (value === undefined) continue;
-    result[key] = resolveValue(key, value, resolveSecret);
+    result[key] = value;
   }
   for (const { key, value } of envFileEntries) {
+    result[key] = value;
+  }
+  for (const [key, value] of Object.entries(result)) {
     result[key] = resolveValue(key, value, resolveSecret);
   }
 

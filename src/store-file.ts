@@ -15,7 +15,7 @@
  * shape; encrypting/decrypting secret values is the responsibility of
  * src/crypto.ts. configDir resolution is the responsibility of src/paths.ts,
  * which is deliberately NOT imported here — this module takes `configDir` as
- * a plain argument and depends only on node:fs, node:path, and src/errors.ts.
+ * a plain argument and delegates private temporary-file persistence to atomic-file.ts.
  */
 import * as fs from 'node:fs';
 import * as path from 'node:path';

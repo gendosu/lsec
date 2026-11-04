@@ -1,6 +1,7 @@
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import { performance } from 'node:perf_hooks';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { StoreError } from '../src/errors.js';
 import { withStoreLock } from '../src/store-lock.js';
@@ -53,6 +54,23 @@ describe('store locking', () => {
     const cause = Object.assign(new Error('denied'), { code: 'EACCES' });
     vi.spyOn(fs, 'mkdirSync').mockImplementation(() => { throw cause; });
     expect(() => withStoreLock(dir, vi.fn())).toThrow(expect.objectContaining({ cause }));
+  });
+
+  it('does not begin an operation after the deadline even if the owner released during a delayed wakeup', () => {
+    const dir = fixture();
+    const lock = path.join(dir, '.lsec.lock');
+    fs.mkdirSync(lock);
+    let now = 0;
+    vi.spyOn(performance, 'now').mockImplementation(() => now);
+    vi.spyOn(Atomics, 'wait').mockImplementation(() => {
+      fs.rmdirSync(lock);
+      now = 100;
+      return 'timed-out';
+    });
+    const operation = vi.fn();
+    expect(() => withStoreLock(dir, operation, 25)).toThrow(/Timed out/);
+    expect(operation).not.toHaveBeenCalled();
+    expect(fs.existsSync(lock)).toBe(false);
   });
 
   it.each([false, true])('reports release failure, retaining operation failure=%s', (failOperation) => {

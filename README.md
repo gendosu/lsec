@@ -457,10 +457,10 @@ lsec run [--dotenv <path>] -- <command> [args...]
 
 - We recommend placing `--` before `<command>`. This clearly separates `lsec run`'s own options (like `--dotenv`) from the options of the command you want to run itself (e.g., the `--watch` in `npm run dev --watch`). (Even without `--`, everything after `<command>` is still passed through as-is, but options like `--dotenv` must always be written before `<command>`.)
 - **The option is named `--dotenv`, not `--env-file`.** We wanted to match the 1Password CLI's `op run --env-file` name, but `--env-file` is a flag name reserved by the Node.js runtime itself since v20.6, and Node intercepts it before lsec's own code even starts, no matter where it appears in argv (if you point it at a nonexistent file, the resulting error message and exit code come from Node itself, not from lsec). We chose a different name deliberately to avoid that collision.
-- There are two sources of references to resolve (matching `op run`'s structure):
-  1. **The parent process's environment variables** whose values are `lsec://<namespace>/<key>` references
-  2. Entries in the `.env` file specified via `--dotenv <path>` (entries from `--dotenv` take precedence over parent environment variables of the same name)
-- Values that aren't references (in either parent environment variables or `.env`) are passed through unchanged. Parent environment variables that aren't references are left completely untouched.
+- The child environment combines two sources (matching `op run`'s structure):
+  1. **The parent process's environment variables**
+  2. Entries in the `.env` file specified via `--dotenv <path>` (entries from `--dotenv` take precedence over parent environment variables of the same name; the last entry for a duplicate key wins, including empty strings)
+- These overrides are applied **before reference resolution**. Only the final value for each variable is resolved if it is a `lsec://<namespace>/<key>` reference; other final values are passed through unchanged. Overwritten references are never parsed or looked up, so even malformed or unregistered references cause no error if replaced by a valid final value.
 
 ### The `lsec://<namespace>/<key>` reference syntax
 
@@ -490,9 +490,9 @@ lsec run --dotenv .env -- npm run dev
 
 ### When resolution or startup fails
 
-A reference to a nonexistent namespace/key, a malformed reference (one that doesn't match the `lsec://<namespace>/<key>` shape), a nonexistent `--dotenv` path, or malformed `.env` content are all detected before the command is launched; an error is printed to stderr and the process exits with 1 (the child process never runs). Secret values are never included in error messages.
+A reference to a nonexistent namespace/key or a malformed reference (one that doesn't match the `lsec://<namespace>/<key>` shape) in a final value after overrides is detected before the command is launched; an error is printed to stderr and the process exits with 1 (the child process never runs). A nonexistent `--dotenv` path or malformed `.env` content also fails before launch; the entire file is parsed even if later entries overwrite earlier ones. Secret values are never included in error messages.
 
-Stored values are general strings: `SecretStore.set` / `get` can round-trip strings containing NUL (`\0`) bytes. Environment-variable injection has stricter requirements. After resolving references and applying all `--dotenv` overrides, `run` rejects NUL-containing or non-string values before launching the child, prints only the variable name and problem type, and exits with 1. This also applies to literal values in `.env` files. For example:
+Stored values are general strings: `SecretStore.set` / `get` can round-trip strings containing NUL (`\0`) bytes. Environment-variable injection has stricter requirements. After applying all `--dotenv` overrides and resolving the final references, `run` rejects NUL-containing or non-string values before launching the child, prints only the variable name and problem type, and exits with 1. This also applies to literal values in `.env` files. For example:
 
 ```text
 Error: Invalid value for environment variable "TOKEN": NUL bytes are not allowed.

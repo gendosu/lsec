@@ -186,6 +186,6 @@ export function writeStoreFile(configDir: string, data: StoreData): void {
       // best-effort cleanup; ignore failures (e.g. tmpPath was never created)
     }
     const msg = err instanceof Error ? err.message : String(err);
-    throw new StoreError(`Failed to write secrets.json at ${secretsPath}: ${msg}`);
+    throw new StoreError(`Failed to write secrets.json at ${secretsPath}: ${msg}`, { cause: err });
   }
 }

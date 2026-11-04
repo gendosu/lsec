@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - Existing `SecretStore` instances and default-instance functions now reload the current master key for each operation that needs it. After another instance or the CLI successfully rotates the key, subsequent reads, writes, and rotations follow the new key instead of failing to decrypt or saving values with an obsolete key. Invalid or unreadable keys fail before saving instead of falling back to an old key. Concurrent operations during rotation still require coordination.
+- Preserve the recovery key after failed or interrupted master key rotation. Backups are created exclusively, and all updates are blocked while a backup remains. Rotation errors identify the failed persistence stage, including cleanup after successful key/data saves. Document full-store verification before manual recovery and backup removal.
 
 ## [0.5.1] - 2026-11-03
 

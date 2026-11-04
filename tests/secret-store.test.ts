@@ -3,7 +3,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { decrypt, encrypt } from '../src/crypto.js';
-import { CryptoError, SecretNotFoundError } from '../src/errors.js';
+import { CryptoError, SecretNotFoundError, StoreError } from '../src/errors.js';
 import { SecretStore } from '../src/secret-store.js';
 import { readStoreFile, writeStoreFile } from '../src/store-file.js';
 
@@ -529,6 +529,35 @@ describe('deleteNamespace', () => {
 });
 
 describe('rotateMasterKey', () => {
+  it('preserves the recovery key and ciphertext through repeated retries after a store write failure', () => {
+    const { store, configDir } = makeStore();
+    store.set('token', 'global-dummy');
+    store.set('token', 'work-dummy', { namespace: 'work' });
+    store.set('token', 'aws-dummy', { namespace: 'aws' });
+    const keyPath = path.join(configDir, 'master.key');
+    const backupPath = path.join(configDir, 'master.key.bak');
+    const secretsPath = path.join(configDir, 'secrets.json');
+    const oldKey = fs.readFileSync(keyPath);
+    const oldSecrets = fs.readFileSync(secretsPath);
+    fs.mkdirSync(`${secretsPath}.tmp`);
+
+    expect(() => store.rotateMasterKey()).toThrow(StoreError);
+    const failedKey = fs.readFileSync(keyPath);
+    expect(failedKey).not.toEqual(oldKey);
+    for (let retry = 0; retry < 3; retry++) {
+      expect(() => store.rotateMasterKey()).toThrow(StoreError);
+      expect(fs.readFileSync(backupPath)).toEqual(oldKey);
+      expect(fs.readFileSync(keyPath)).toEqual(failedKey);
+      expect(fs.readFileSync(secretsPath)).toEqual(oldSecrets);
+      const data = readStoreFile(configDir);
+      expect(decrypt(data.global['token']!, fs.readFileSync(backupPath))).toBe('global-dummy');
+      for (const namespace of ['work', 'aws']) {
+        expect(decrypt(data.namespaces[namespace]!['token']!, fs.readFileSync(backupPath)))
+          .toBe(`${namespace}-dummy`);
+      }
+    }
+  });
+
   it('returns 0 and still rotates master.key for an empty store', () => {
     const { store, configDir } = makeStore();
     const keyPath = path.join(configDir, 'master.key');

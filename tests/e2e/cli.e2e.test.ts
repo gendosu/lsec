@@ -1,4 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
 import pkg from '../../package.json' with { type: 'json' };
 import { existsSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -234,6 +236,74 @@ describe('lsec CLI (e2e)', () => {
     expect(result.exitCode).toBe(0);
     expect(result.stderr).toContain('0');
   });
+
+  it.each(['data persistence', 'backup cleanup'])(
+    '%s の中断後は別 CLI の更新を拒否し、全値確認後に復旧できる',
+    async (stage) => {
+      const values = [
+        { key: 'token', namespace: undefined, value: 'global-recovery-dummy' },
+        { key: 'token', namespace: 'work', value: 'work-recovery-dummy' },
+        { key: 'token', namespace: 'aws', value: 'aws-recovery-dummy' },
+      ];
+      for (const { key, namespace, value } of values) {
+        const result = await runCli(
+          ['set', key, ...(namespace ? ['--ns', namespace] : []), '--stdin'], configDir, value
+        );
+        expect(result.exitCode).toBe(0);
+      }
+      const keyPath = path.join(configDir, 'master.key');
+      const secretsPath = path.join(configDir, 'secrets.json');
+      const backupPath = path.join(configDir, 'master.key.bak');
+      const oldKey = fs.readFileSync(keyPath);
+      if (stage === 'data persistence') fs.mkdirSync(`${secretsPath}.tmp`);
+      const rotated = await runCli(['rotate-key', '--yes'], configDir);
+      if (stage === 'data persistence') {
+        expect(rotated.exitCode).not.toBe(0);
+        expect(rotated.stderr).toContain('secrets.json persistence');
+        fs.rmdirSync(`${secretsPath}.tmp`);
+      } else {
+        expect(rotated.exitCode).toBe(0);
+        // Represents a crash after data persistence but before backup removal.
+        fs.writeFileSync(backupPath, oldKey, { mode: 0o600 });
+      }
+      const before = [keyPath, secretsPath, backupPath].map((file) => fs.readFileSync(file));
+      expect(before[0]).not.toEqual(oldKey);
+      expect(before[2]).toEqual(oldKey);
+      for (const args of [
+        ['rotate-key', '--yes'], ['rotate-key', '--yes'],
+        ['set', 'token', '--stdin'], ['set', 'token', '--ns', 'work', '--stdin'],
+        ['delete', 'token'], ['delete', 'missing'], ['delete-namespace', 'work', '--yes'],
+      ]) {
+        const result = await runCli(args, configDir, 'replacement-recovery-dummy');
+        expect(result.exitCode).not.toBe(0);
+        expect(result.stdout).toBe('');
+        expect(result.stderr).toMatch(/recovery/i);
+        expect(result.stderr).not.toContain('replacement-recovery-dummy');
+        expect([keyPath, secretsPath, backupPath].map((file) => fs.readFileSync(file))).toEqual(before);
+      }
+      if (stage === 'data persistence') {
+        const failedRead = await runCli(['get', 'token'], configDir);
+        expect(failedRead.exitCode).not.toBe(0);
+        expect(failedRead.stdout).toBe('');
+        fs.copyFileSync(backupPath, keyPath);
+      }
+      for (const { key, namespace, value } of values) {
+        const result = await runCli(['get', key, ...(namespace ? ['--ns', namespace] : [])], configDir);
+        expect(result.exitCode).toBe(0);
+        expect(result.stdout).toBe(value);
+      }
+      fs.unlinkSync(backupPath);
+      expect((await runCli(['set', 'recovered', '--stdin'], configDir, 'recovered-dummy')).exitCode).toBe(0);
+      expect((await runCli(['rotate-key', '--yes'], configDir)).exitCode).toBe(0);
+      for (const { key, namespace, value } of values) {
+        const result = await runCli(['get', key, ...(namespace ? ['--ns', namespace] : [])], configDir);
+        expect(result.exitCode).toBe(0);
+        expect(result.stdout).toBe(value);
+      }
+      expect((await runCli(['get', 'recovered'], configDir)).stdout).toBe('recovered-dummy');
+      expect(fs.existsSync(backupPath)).toBe(false);
+    }
+  );
 
   it.each(['get', 'tryGet', 'set', 'rotateMasterKey'] as const)(
     'CLI のローテーション後、既存ライブラリの最初の %s が現行鍵に追従する',

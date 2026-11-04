@@ -18,7 +18,17 @@ A general-purpose local secret store that encrypts values with AES-256-GCM and d
 
 Values are strings only (structured JSON values and remote sync are out of scope).
 
-Using it as a library requires Node.js 20.18.3+, 22.12.0+, or 23.1.0+. The binary CLI does not require Node.js.
+The library and the CLI running on Node.js support only these major versions:
+
+| Node.js major | Minimum version |
+| --- | --- |
+| 22 | 22.12.0 |
+| 24 | 24.0.0 |
+| 26 | 26.0.0 |
+
+The supported range is `^22.12.0 || ^24.0.0 || ^26.0.0`. CI tests the minimum and latest release of each supported major. Use the latest patch release of a supported major. Additional major versions require explicit validation and updates to `engines.node`, CI, and this documentation before they are supported.
+
+The prebuilt binary CLI does not require Node.js and is unaffected by this support policy.
 
 ## Installation
 
@@ -85,6 +95,8 @@ xattr -d com.apple.quarantine <path>
 ### Building from source
 
 `bun` is required (used to build the single binary).
+
+Development uses Node.js 26, as selected by `.node-version`. This development setting is separate from the supported runtime versions listed above.
 
 ```bash
 pnpm install

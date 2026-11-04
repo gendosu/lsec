@@ -53,10 +53,14 @@ export class SecretStore {
   /**
    * Lazily loads (or creates, on first use) the master key for this
    * instance's `configDir`. Recovery checks invalidate the cache so reads
-   * reflect the current on-disk key while a backup remains.
+   * reflect the current on-disk key while a backup remains. That key is
+   * never cached: manual recovery may replace it before removing the backup.
    */
   private getMasterKey(): Buffer {
-    if (hasMasterKeyBackup(this.configDir)) this.masterKey = undefined;
+    if (hasMasterKeyBackup(this.configDir)) {
+      this.masterKey = undefined;
+      return loadOrCreateMasterKey(this.configDir);
+    }
     if (!this.masterKey) {
       this.masterKey = loadOrCreateMasterKey(this.configDir);
     }

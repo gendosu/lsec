@@ -76,6 +76,28 @@ function expectUpdatesBlocked(store: SecretStore, configDir: string) {
 }
 
 describe('pending rotation recovery', () => {
+  it('does not retain a failed read key when another reader verifies and clears recovery', () => {
+    const { configDir, store } = makeFixture();
+    const keyPath = path.join(configDir, 'master.key');
+    const backupPath = path.join(configDir, 'master.key.bak');
+    const tmpPath = path.join(configDir, 'secrets.json.tmp');
+    fs.mkdirSync(tmpPath);
+    expect(() => store.rotateMasterKey()).toThrow(StoreError);
+    expect(() => store.get('token')).toThrow(CryptoError);
+    expect(() => store.tryGet('token')).toThrow(CryptoError);
+    fs.rmdirSync(tmpPath);
+    fs.copyFileSync(backupPath, keyPath);
+    expectAllValues(new SecretStore({ configDir }));
+    fs.unlinkSync(backupPath);
+
+    store.set('after-recovery', 'recovered-dummy');
+    const reader = new SecretStore({ configDir });
+    expectAllValues(reader);
+    expect(reader.get('after-recovery')).toBe('recovered-dummy');
+    expect(store.rotateMasterKey()).toBe(entries.length + 1);
+    expectAllValues(new SecretStore({ configDir }));
+  });
+
   it('blocks every mutation in existing and new instances without masking mismatched-key reads', () => {
     const { configDir, store } = makeFixture();
     fs.mkdirSync(path.join(configDir, 'secrets.json.tmp'));

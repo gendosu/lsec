@@ -74,6 +74,124 @@ describe('resolveEnv', () => {
     expect(env.FOO).toBe('from-env-file');
   });
 
+  describe.each(['parent environment', 'dotenv duplicates'] as const)('precedence over %s', (source) => {
+    it.each([
+      ['lsec://onlynamespace', 'literal-value', 'literal-value'],
+      ['lsec://onlynamespace', 'lsec://work/token', 'resolved-value'],
+      ['lsec://onlynamespace', '', ''],
+      ['lsec://global/missing', 'literal-value', 'literal-value'],
+      ['lsec://global/missing', 'lsec://work/token', 'resolved-value'],
+      ['lsec://global/missing', '', ''],
+    ])('ignores %s when the final value is "%s"', (previous, final, expected) => {
+      const resolveSecret = vi.fn((ref: SecretRef) => {
+        if (ref.namespace === 'work' && ref.key === 'token') return 'resolved-value';
+        throw new Error('Secret not found.');
+      });
+      const env = resolveEnv({
+        processEnv: { TOKEN: source === 'parent environment' ? previous : 'parent-value' },
+        envFileEntries: [
+          ...(source === 'dotenv duplicates'
+            ? [{ key: 'TOKEN', value: 'lsec://global/missing' }, { key: 'TOKEN', value: previous }]
+            : []),
+          { key: 'TOKEN', value: final },
+        ],
+        resolveSecret,
+      });
+
+      expect(env.TOKEN).toBe(expected);
+      if (final === 'lsec://work/token') {
+        expect(resolveSecret).toHaveBeenCalledExactlyOnceWith({ namespace: 'work', key: 'token' });
+      } else {
+        expect(resolveSecret).not.toHaveBeenCalled();
+      }
+    });
+  });
+
+  it.each(['lsec://onlynamespace', 'lsec://global/missing'])(
+    'rejects a final invalid reference %s without resolving previous values',
+    (final) => {
+      const resolveSecret = vi.fn((ref: SecretRef) => {
+        if (ref.key === 'previous') return 'previous-value';
+        throw new Error('Secret not found.');
+      });
+      expect(() => resolveEnv({
+        processEnv: { TOKEN: 'lsec://global/previous' },
+        envFileEntries: [
+          { key: 'TOKEN', value: 'lsec://work/previous' },
+          { key: 'TOKEN', value: final },
+        ],
+        resolveSecret,
+      })).toThrow(/Could not resolve secret reference for environment variable "TOKEN":/);
+      if (final === 'lsec://global/missing') {
+        expect(resolveSecret).toHaveBeenCalledExactlyOnceWith({ key: 'missing' });
+      } else {
+        expect(resolveSecret).not.toHaveBeenCalled();
+      }
+    }
+  );
+
+  it('still rejects an invalid reference on a different key after overriding another key', () => {
+    expect(() => resolveEnv({
+      processEnv: { TOKEN: 'lsec://global/missing', OTHER: 'lsec://onlynamespace' },
+      envFileEntries: [{ key: 'TOKEN', value: 'replacement' }],
+      resolveSecret: vi.fn(),
+    })).toThrow(/environment variable "OTHER"/);
+  });
+
+  it.each([
+    { label: 'omitted', envFileEntries: undefined },
+    { label: 'empty', envFileEntries: [] },
+  ])('resolves own parent entries when dotenv is $label', ({ envFileEntries }) => {
+    const processEnv = Object.assign(Object.create({ INHERITED: 'lsec://onlynamespace' }), {
+      TOKEN: 'lsec://global/token', UNSET: undefined,
+    });
+    const resolveSecret = vi.fn(() => 'resolved-value');
+    const env = resolveEnv({ processEnv, envFileEntries, resolveSecret });
+    expect({ ...env }).toEqual({ TOKEN: 'resolved-value' });
+    expect(resolveSecret).toHaveBeenCalledExactlyOnceWith({ key: 'token' });
+  });
+
+  it('preserves prototype-like keys through overrides without changing either input', () => {
+    const processEnv = Object.freeze({
+      ['__proto__']: 'lsec://onlynamespace',
+      constructor: 'lsec://global/missing',
+      toString: 'lsec://onlynamespace',
+    });
+    const envFileEntries = [
+      Object.freeze({ key: '__proto__', value: 'lsec://global/missing' }),
+      Object.freeze({ key: '__proto__', value: 'lsec://global/token' }),
+      Object.freeze({ key: 'constructor', value: 'literal-value' }),
+      Object.freeze({ key: 'toString', value: '' }),
+    ];
+    Object.freeze(envFileEntries);
+    const parentBefore = { ...processEnv };
+    const entriesBefore = envFileEntries.map((entry) => ({ ...entry }));
+    const resolveSecret = vi.fn(() => 'resolved-value');
+    const env = resolveEnv({ processEnv, envFileEntries, resolveSecret });
+
+    expect(Object.getPrototypeOf(env)).toBeNull();
+    expect({ ...env }).toEqual({
+      ['__proto__']: 'resolved-value', constructor: 'literal-value', toString: '',
+    });
+    expect(processEnv).toEqual(parentBefore);
+    expect(envFileEntries).toEqual(entriesBefore);
+    expect(resolveSecret).toHaveBeenCalledExactlyOnceWith({ key: 'token' });
+  });
+
+  it('resolves each final key once without recursively resolving or caching the returned value', () => {
+    const resolveSecret = vi.fn(() => 'lsec://global/returned-value');
+    const env = resolveEnv({
+      processEnv: { FIRST: 'lsec://global/token' },
+      envFileEntries: [{ key: 'SECOND', value: 'lsec://global/token' }],
+      resolveSecret,
+    });
+    expect({ ...env }).toEqual({
+      FIRST: 'lsec://global/returned-value', SECOND: 'lsec://global/returned-value',
+    });
+    expect(resolveSecret).toHaveBeenCalledTimes(2);
+    expect(resolveSecret.mock.calls).toEqual([[{ key: 'token' }], [{ key: 'token' }]]);
+  });
+
   it('leaves process.env entries that are not in --env-file untouched, and vice versa', () => {
     const env = resolveEnv({
       processEnv: { ONLY_PROCESS: 'p' },

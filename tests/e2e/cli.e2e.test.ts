@@ -443,6 +443,63 @@ describe('run (op run 相当のシークレット注入コマンド)', () => {
     expect(result.stdout.trim()).toBe('from-env-file');
   });
 
+  describe.each(['parent environment', 'dotenv duplicates'] as const)('%s の上書き', (source) => {
+    it.each(['lsec://onlynamespace', 'lsec://global/missing'])(
+      '%s は使わず、最終的なリテラル・登録済み参照・空文字を子へ渡す',
+      async (previous) => {
+        expect((await runCli(['set', 'token', '--stdin'], configDir, 'dummy-final-secret')).exitCode).toBe(0);
+        const envFile = join(configDir, '.env');
+        const keys = ['LITERAL_TOKEN', 'SECRET_TOKEN', 'EMPTY_TOKEN'];
+        const duplicateLines = source === 'dotenv duplicates'
+          ? keys.flatMap((key) => [`${key}=lsec://global/missing`, `${key}=${previous}`])
+          : [];
+        writeFileSync(envFile, [
+          ...duplicateLines,
+          'LITERAL_TOKEN=dummy-literal',
+          'SECRET_TOKEN=lsec://global/token',
+          'EMPTY_TOKEN=',
+          '',
+        ].join('\n'));
+
+        const result = await runCli(
+          ['run', '--dotenv', envFile, '--', process.execPath, '-e',
+            'console.log(JSON.stringify([process.env.LITERAL_TOKEN, process.env.SECRET_TOKEN, process.env.EMPTY_TOKEN]))'],
+          configDir,
+          undefined,
+          Object.fromEntries(keys.map((key) => [key, source === 'parent environment' ? previous : 'lsec://onlynamespace']))
+        );
+        expect(result.exitCode).toBe(0);
+        expect(JSON.parse(result.stdout)).toEqual(['dummy-literal', 'dummy-final-secret', '']);
+        expect(result.stderr).toBe('');
+      }
+    );
+  });
+
+  it.each([
+    ['lsec://onlynamespace', 'Invalid secret reference'],
+    ['lsec://global/missing', 'Secret "missing" was not found'],
+  ])('dotenv の最後に %s が残れば、子を起動せず変数名付きで失敗する', async (final, diagnostic) => {
+    const previousSecret = 'dummy-previous-secret';
+    expect((await runCli(['set', 'token', '--stdin'], configDir, previousSecret)).exitCode).toBe(0);
+    const envFile = join(configDir, '.env');
+    const marker = join(configDir, 'child-started');
+    writeFileSync(envFile, `TOKEN=lsec://global/token\nTOKEN=${final}\n`);
+
+    const result = await runCli(
+      ['run', '--dotenv', envFile, '--', process.execPath, '-e',
+        'require("node:fs").writeFileSync(process.argv[1], "ran"); console.log("should-not-run")', marker],
+      configDir,
+      undefined,
+      { TOKEN: 'lsec://global/token' }
+    );
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toBe('');
+    expect(result.stderr).toContain('Could not resolve secret reference for environment variable "TOKEN":');
+    expect(result.stderr).toContain(diagnostic);
+    expect(result.stderr).not.toContain(previousSecret);
+    expect(existsSync(marker)).toBe(false);
+  });
+
   it('"--" を付けなくても <command> 自身のオプション（--version 等）が passthrough され、lsec 自身のオプションとして誤解釈されない', async () => {
     // Regression test: without passThroughOptions/enablePositionalOptions,
     // `lsec run node --version` used to be silently swallowed by the

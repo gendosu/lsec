@@ -17,7 +17,7 @@ import { readFileSync } from 'node:fs';
 import { constants as osConstants } from 'node:os';
 import { Command } from 'commander';
 import pkg from '../package.json' with { type: 'json' };
-import { formatSecretRef, parseEnvFile, resolveEnv, SecretStore, type EnvFileEntry } from './index.js';
+import { formatSecretRef, parseEnvFile, resolveEnv, validateRunEnv, SecretStore, type EnvFileEntry } from './index.js';
 import { promptConfirm, promptHiddenPassword } from './prompt.js';
 
 /**
@@ -319,6 +319,7 @@ program
       resolveSecret: (ref) => store.get(ref.key, { namespace: ref.namespace }),
     });
 
+    validateRunEnv(env);
     process.exitCode = await runChildProcess(command, args, env);
   });
 

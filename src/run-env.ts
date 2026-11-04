@@ -81,6 +81,22 @@ export function resolveEnv(options: ResolveEnvOptions): Record<string, string> {
   return result;
 }
 
+/**
+ * Validates the final, resolved environment after all dotenv overrides.
+ * Storage accepts general strings; child-process environments cannot contain
+ * NUL bytes. Never include a value in these errors, even through coercion.
+ */
+export function validateRunEnv(env: Record<string, unknown>): asserts env is Record<string, string> {
+  for (const [key, value] of Object.entries(env)) {
+    if (typeof value !== 'string') {
+      throw new Error(`Invalid value for environment variable "${key}": value must be a string.`);
+    }
+    if (value.includes('\0')) {
+      throw new Error(`Invalid value for environment variable "${key}": NUL bytes are not allowed.`);
+    }
+  }
+}
+
 function resolveValue(key: string, value: string, resolveSecret: (ref: SecretRef) => string): string {
   if (!isSecretRef(value)) return value;
   try {

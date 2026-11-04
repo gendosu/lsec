@@ -84,14 +84,50 @@ xattr -d com.apple.quarantine <path>
 
 ### Building from source
 
-`bun` is required (used to build the single binary).
+Install [mise](https://mise.jdx.dev/getting-started.html) and run the following commands from the repository root. `mise.toml` enables the version files for the development tools: `.node-version` selects Node.js, `package.json`'s `packageManager` selects pnpm, and `.bun-version` selects Bun (used to build the single binary). These development versions are separate from the library's runtime requirements above.
+
+If `mise` is not on PATH, replace it in each command with its absolute path, such as `"$HOME/.local/bin/mise"` for the default installation.
+
+Review the repository configuration, then trust it and install its tools:
 
 ```bash
-pnpm install
-pnpm build:bun
+mise trust
+mise install
 ```
 
-This produces a single binary at `bin/lsec`.
+Use [mise exec](https://mise.jdx.dev/cli/exec.html) in scripts and non-interactive shells without relying on automatic shell activation. `MISE_ACTIVATE_AGGRESSIVE=1` [keeps mise's tools ahead of competing PATH entries](https://mise.jdx.dev/configuration/settings.html#activate_aggressive), including nodenv shims. This also ensures that pnpm's child processes (including npm in the `prepare` script) use the selected Node.js. The setting applies only to each command.
+
+Check the versions and the Node.js executable used by a pnpm child process:
+
+```bash
+MISE_ACTIVATE_AGGRESSIVE=1 mise exec -- node --version
+MISE_ACTIVATE_AGGRESSIVE=1 mise exec -- pnpm --version
+MISE_ACTIVATE_AGGRESSIVE=1 mise exec -- bun --version
+MISE_ACTIVATE_AGGRESSIVE=1 mise exec -- pnpm exec node -p 'JSON.stringify({version:process.version,execPath:process.execPath})'
+```
+
+The versions should match the repository's version files, and the child process's `execPath` should point to mise's Node.js installation.
+
+Install dependencies, build the library, and run the tests:
+
+```bash
+MISE_ACTIVATE_AGGRESSIVE=1 mise exec -- pnpm install --frozen-lockfile
+MISE_ACTIVATE_AGGRESSIVE=1 mise exec -- pnpm build
+MISE_ACTIVATE_AGGRESSIVE=1 mise exec -- pnpm test:unit
+MISE_ACTIVATE_AGGRESSIVE=1 mise exec -- pnpm test:e2e
+```
+
+Build the single binary at `bin/lsec`, then check it and run the same E2E suite against it:
+
+```bash
+MISE_ACTIVATE_AGGRESSIVE=1 mise exec -- pnpm build:bun
+./bin/lsec --version
+LSEC_E2E_CLI="$PWD/bin/lsec" MISE_ACTIVATE_AGGRESSIVE=1 mise exec -- pnpm test:e2e
+```
+
+For interactive use, place mise activation after nodenv/anyenv initialization and other PATH changes in the startup file your shell actually reads (for example, `~/.bashrc` for interactive Bash or `~/.zshrc` for Zsh). Bash login shells may need to source `~/.bashrc` from `~/.bash_profile` after initializing nodenv/anyenv. Use `eval "$(mise activate bash)"` for Bash or `eval "$(mise activate zsh)"` for Zsh, then open a new shell and run `command -v node` and `command -v pnpm` in the repository root to check that mise's tools take precedence. Non-interactive execution should keep using the explicit commands above.
+
+The Dev Container's `.devcontainer/postCreate.sh` uses the same trust/install sequence and `CI=true MISE_ACTIVATE_AGGRESSIVE=1 mise exec -- pnpm install --frozen-lockfile` for dependency installation.
 
 ### Using it as a library
 

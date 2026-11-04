@@ -84,14 +84,50 @@ xattr -d com.apple.quarantine <path>
 
 ### ソースからビルド
 
-`bun` が必要です（単一バイナリのビルドに使用します）。
+[mise](https://mise.jdx.dev/getting-started.html) をインストールし、リポジトリルートで以下のコマンドを実行してください。`mise.toml` は開発ツールのバージョン指定ファイルを有効にしています。Node.js は `.node-version`、pnpm は `package.json` の `packageManager`、単一バイナリのビルドに使う Bun は `.bun-version` で選択します。これらの開発用バージョンと、前述のライブラリの実行要件は別です。
+
+`mise` が PATH にない場合は、各コマンドの `mise` をインストール先の絶対パス（既定のインストールなら `"$HOME/.local/bin/mise"`）に置き換えてください。
+
+リポジトリの設定内容を確認してから、この設定を信頼し、ツールをインストールします。
 
 ```bash
-pnpm install
-pnpm build:bun
+mise trust
+mise install
 ```
 
-`bin/lsec` に単一バイナリが生成されます。
+スクリプトや非対話シェルでは、自動 activation に依存せず [mise exec](https://mise.jdx.dev/cli/exec.html) を使います。`MISE_ACTIVATE_AGGRESSIVE=1` は、nodenv の shim など、[競合する PATH のエントリより mise のツールを優先する設定](https://mise.jdx.dev/configuration/settings.html#activate_aggressive)です。pnpm の子プロセス（`prepare` スクリプトの npm を含む）も、選択した Node.js を使用できます。この指定は各コマンドにのみ適用されます。
+
+バージョンと、pnpm の子プロセスが使う Node.js の実行ファイルを確認します。
+
+```bash
+MISE_ACTIVATE_AGGRESSIVE=1 mise exec -- node --version
+MISE_ACTIVATE_AGGRESSIVE=1 mise exec -- pnpm --version
+MISE_ACTIVATE_AGGRESSIVE=1 mise exec -- bun --version
+MISE_ACTIVATE_AGGRESSIVE=1 mise exec -- pnpm exec node -p 'JSON.stringify({version:process.version,execPath:process.execPath})'
+```
+
+バージョンがリポジトリの指定と一致し、子プロセスの `execPath` が mise の Node.js インストール先を指すことを確認してください。
+
+依存関係をインストールし、ライブラリのビルドとテストを実行します。
+
+```bash
+MISE_ACTIVATE_AGGRESSIVE=1 mise exec -- pnpm install --frozen-lockfile
+MISE_ACTIVATE_AGGRESSIVE=1 mise exec -- pnpm build
+MISE_ACTIVATE_AGGRESSIVE=1 mise exec -- pnpm test:unit
+MISE_ACTIVATE_AGGRESSIVE=1 mise exec -- pnpm test:e2e
+```
+
+`bin/lsec` に単一バイナリを生成し、起動確認と同じ E2E スイートをバイナリに対して実行します。
+
+```bash
+MISE_ACTIVATE_AGGRESSIVE=1 mise exec -- pnpm build:bun
+./bin/lsec --version
+LSEC_E2E_CLI="$PWD/bin/lsec" MISE_ACTIVATE_AGGRESSIVE=1 mise exec -- pnpm test:e2e
+```
+
+対話シェルで使う場合は、そのシェルが実際に読み込む初期化ファイル（例: 対話 Bash の `~/.bashrc`、Zsh の `~/.zshrc`）で、nodenv/anyenv の初期化と他の PATH 変更の後に mise の activation を配置してください。Bash のログインシェルでは、nodenv/anyenv の初期化後に `~/.bash_profile` から `~/.bashrc` を読み込む必要がある場合もあります。Bash では `eval "$(mise activate bash)"`、Zsh では `eval "$(mise activate zsh)"` を使い、新しいシェルを開いてリポジトリルートで `command -v node` と `command -v pnpm` を実行し、mise のツールが優先されることを確認します。非対話実行では、上記の明示的なコマンドを使用してください。
+
+Dev Container の `.devcontainer/postCreate.sh` も同じ trust/install の順序と、依存導入用の `CI=true MISE_ACTIVATE_AGGRESSIVE=1 mise exec -- pnpm install --frozen-lockfile` を使用します。
 
 ### ライブラリとして使う場合
 

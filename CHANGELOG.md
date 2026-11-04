@@ -9,15 +9,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-11-04
+
+### Added
+
+- Export `validateRunEnv` to validate resolved environment values before starting a child process, without including values in error messages.
+
 ### Changed
 
-- **Breaking**: Limit the Node.js library and Node.js CLI to `^22.12.0 || ^24.0.0 || ^26.0.0` (minimum versions: 22.12.0, 24.0.0, and 26.0.0). Drop support for EOL Node.js 20, 23, and 25 and exclude unverified future majors so the supported range matches the LTS lines we maintain and test. CI covers the minimum and latest release of each supported major. Prebuilt binaries are unaffected. This change is intended for the next minor release (0.6.0), not a 0.5.x patch release
+- **Breaking**: Limit the Node.js library and Node.js CLI to `^22.12.0 || ^24.0.0 || ^26.0.0` (minimum versions: 22.12.0, 24.0.0, and 26.0.0). Drop support for EOL Node.js 20, 23, and 25 and exclude unverified future majors so the supported range matches the LTS lines we maintain and test. CI covers the minimum and latest release of each supported major. Prebuilt binaries are unaffected.
+- Align development Node.js type definitions with the minimum supported major (22), and use mise-managed tools consistently in non-interactive commands and Dev Container setup.
 
 ### Fixed
 
 - Serialize reads, updates, initial key creation, and rotation across processes sharing a store. Bound synchronous lock waits to 5 seconds and preserve stale locks for explicit recovery after abrupt exits. Exclusively create unique private temporary files so one operation cannot overwrite or remove another operation’s work. Preserve the synchronous API and existing store format.
 - Existing `SecretStore` instances and default-instance functions now reload the current master key for each operation that needs it. After another instance or the CLI successfully rotates the key, subsequent reads, writes, and rotations follow the new key instead of failing to decrypt or saving values with an obsolete key. Invalid or unreadable keys fail before saving instead of falling back to an old key. Operations are now serialized with the store lock.
 - Preserve the recovery key after failed or interrupted master key rotation. Backups are created exclusively, and all updates are blocked while a backup remains. Rotation errors identify the failed persistence stage, including cleanup after successful key/data saves. Document full-store verification before manual recovery and backup removal.
+- Prevent `lsec run` startup errors from exposing decrypted secrets. Validate the final environment before spawning and replace synchronous and asynchronous startup errors with fixed diagnostics.
+- Apply all dotenv overrides before resolving secret references in `lsec run` / `resolveEnv`. Only each variable's final value is resolved, so overwritten invalid or missing references no longer cause failures; duplicate dotenv keys use the last value, including empty strings.
+- Forward SIGTERM and SIGINT received by `lsec run` to its direct child, wait for the child to exit, and propagate its exit status.
+- Make interrupted interactive prompts fail explicitly: Ctrl-C exits with 130, and EOF or input/output failures exit with 1. Partial input is never saved or accepted as confirmation, and terminal state is restored. Explicit negative or empty confirmations still cancel with exit 0.
+- Preserve the installed executable when an installer download, checksum, startup check, or replacement fails. Stage and validate on the destination filesystem before replacing the binary with a single rename, and clean up temporary files on failure or INT/TERM interruption.
 
 ## [0.5.1] - 2026-11-03
 
@@ -110,7 +122,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Fixed `dist` not being built on git-based installs, by adding a `prepare` script
 
-[Unreleased]: https://github.com/gendosu/lsec/compare/v0.5.1...HEAD
+[Unreleased]: https://github.com/gendosu/lsec/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/gendosu/lsec/releases/tag/v0.6.0
 [0.5.1]: https://github.com/gendosu/lsec/releases/tag/v0.5.1
 [0.5.0]: https://github.com/gendosu/lsec/releases/tag/v0.5.0
 [0.4.1]: https://github.com/gendosu/lsec/releases/tag/v0.4.1

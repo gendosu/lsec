@@ -129,6 +129,8 @@ describe.each([
     try {
       await check;
       expect(input.isRaw).toBe(false);
+      // Successful writes may still have callbacks queued after cancellation.
+      await new Promise<void>((resolve) => setImmediate(resolve));
       expect(input.listenerCount('keypress')).toBe(0);
       expect(input.listenerCount('end')).toBe(0);
       expect(input.listenerCount('error')).toBe(0);
@@ -233,6 +235,73 @@ describe.each([
     const result = within(prompt('Question? ', input, output));
     input.write('yes\n');
     await expect(result).rejects.toMatchObject({ exitCode: 1, message: 'Interactive prompt failed.' });
+    expect(input.isRaw).toBe(false);
+  });
+
+  it.each(['\x03', '\x04'])('handles a delayed output error after interruption %j', async (key) => {
+    const { input } = streams();
+    let failWrite: (error: Error) => void;
+    const output = new Writable({
+      write(_chunk, _encoding, callback) { failWrite = callback; },
+    });
+    const result = within(prompt('Question? ', input, output));
+    input.write(key);
+    await expect(result).rejects.toMatchObject({ exitCode: key === '\x03' ? 130 : 1 });
+    expect(input.isRaw).toBe(false);
+    failWrite!(new Error('sensitive-dummy'));
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(output.listenerCount('error')).toBe(0);
+    expect(input.listenerCount('error')).toBe(0);
+  });
+
+  it('cleans up the output error listener after delayed successful output following interruption', async () => {
+    const { input } = streams();
+    const writes: Array<(error?: Error) => void> = [];
+    const output = new Writable({
+      write(_chunk, _encoding, callback) { writes.push(callback); },
+    });
+    const result = within(prompt('Question? ', input, output));
+    input.write('\x03');
+    await expect(result).rejects.toMatchObject({ exitCode: 130 });
+    for (let index = 0; index < writes.length; index++) writes[index]();
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(output.listenerCount('error')).toBe(0);
+  });
+
+  it('handles input failure followed by a delayed failure of the final answer output', async () => {
+    const { input } = streams();
+    let failFinalWrite: (error: Error) => void;
+    const output = new Writable({
+      write(chunk, _encoding, callback) {
+        if (chunk.toString() === (_name === 'hidden' ? '\n' : '')) failFinalWrite = callback;
+        else callback();
+      },
+    });
+    const result = within(prompt('Question? ', input, output));
+    input.write('yes\n');
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(failFinalWrite!).toBeTypeOf('function');
+    input.emit('error', new Error('sensitive-input-dummy'));
+    await expect(result).rejects.toMatchObject({ exitCode: 1, message: 'Interactive prompt failed.' });
+    failFinalWrite!(new Error('sensitive-output-dummy'));
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(output.listenerCount('error')).toBe(0);
+    expect(input.isRaw).toBe(false);
+  });
+
+  it('cleans up after output closes before a delayed write callback fails', async () => {
+    const { input } = streams();
+    let failWrite: (error: Error) => void;
+    const output = new Writable({
+      write(_chunk, _encoding, callback) { failWrite = callback; },
+    });
+    const result = within(prompt('Question? ', input, output));
+    output.destroy();
+    await expect(result).rejects.toMatchObject({ exitCode: 1 });
+    failWrite!(new Error('sensitive-dummy'));
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(output.listenerCount('error')).toBe(0);
+    expect(output.listenerCount('close')).toBe(0);
     expect(input.isRaw).toBe(false);
   });
 

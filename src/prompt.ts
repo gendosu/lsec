@@ -30,19 +30,33 @@ function promptLine(question: string, input: Readable, output: Writable, hidden:
     let rl: readline.Interface | undefined;
     let settled = false;
     let answered = false;
+    let pendingOutput = 0;
+    let outputFailed = false;
+    let outputErrorSeen = false;
+    let outputClosed = false;
     // readline also writes cursor controls outside _writeToOutput. Forward
     // through an owned stream so synchronous failures during editing reject
     // the prompt rather than escaping from an input event handler.
     const display = new PassThrough();
     Object.defineProperty(display, 'columns', { get: () => (output as NodeJS.WriteStream).columns });
-    display.on('data', (chunk: Buffer) => {
-      if (settled) return;
+    function writeOutput(chunk: string | Buffer, onSuccess?: () => void): void {
+      pendingOutput++;
       try {
-        output.write(chunk);
+        output.write(chunk, (error) => {
+          pendingOutput--;
+          if (error) outputFailed = true;
+          else onSuccess?.();
+          releaseOutputErrorListener();
+        });
       } catch {
+        pendingOutput--;
         onError();
       }
-    });
+    }
+    function forwardOutput(chunk: Buffer): void {
+      if (!settled) writeOutput(chunk);
+    }
+    display.on('data', forwardOutput);
     const onResize = () => display.emit('resize');
     // Construction can throw after readline attaches listeners but before it
     // returns an interface. Track only those additions so cleanup still works.
@@ -72,13 +86,13 @@ function promptLine(question: string, input: Readable, output: Writable, hidden:
         input.removeListener('end', onEnd);
         input.removeListener('close', onEnd);
         input.removeListener('error', onError);
-        output.removeListener('error', onError);
-        output.removeListener('close', onError);
+        releaseOutputErrorListener();
         output.removeListener('finish', onError);
         output.removeListener('resize', onResize);
         rl?.removeListener('error', onError);
         rl?.removeListener('SIGINT', onInterrupt);
         rl?.removeListener('close', onEnd);
+        display.removeListener('data', forwardOutput);
         display.destroy();
       }
       if (error) reject(error);
@@ -94,13 +108,31 @@ function promptLine(question: string, input: Readable, output: Writable, hidden:
     function onError(): void {
       finish(new PromptError('IO'));
     }
+    function releaseOutputErrorListener(): void {
+      // Cancellation can finish before an earlier write fails. Keep the error
+      // handler until all write callbacks AND any subsequent error event run.
+      if (settled && (outputClosed || (pendingOutput === 0 && (!outputFailed || outputErrorSeen)))) {
+        output.removeListener('error', onOutputError);
+        output.removeListener('close', onOutputClose);
+      }
+    }
+    function onOutputError(): void {
+      outputErrorSeen = true;
+      onError();
+      releaseOutputErrorListener();
+    }
+    function onOutputClose(): void {
+      outputClosed = true;
+      onError();
+      releaseOutputErrorListener();
+    }
 
     // Run before readline's EOF handler, which can emit an unterminated line
     // as an answer. Only Enter submits a secret or a destructive confirmation.
     input.on('end', onEnd);
     input.on('close', onEnd);
-    output.on('error', onError);
-    output.on('close', onError);
+    output.on('error', onOutputError);
+    output.on('close', onOutputClose);
     output.on('finish', onError);
     output.on('resize', onResize);
     try {
@@ -137,15 +169,9 @@ function promptLine(question: string, input: Readable, output: Writable, hidden:
       rl.question(question, (answer) => {
         if (settled || answered) return;
         answered = true;
-        try {
-          // Wait for output errors before accepting the answer. On failure,
-          // Writable emits 'error' after invoking the write callback.
-          output.write(hidden ? '\n' : '', (error) => {
-            if (!error) finish(undefined, answer);
-          });
-        } catch {
-          onError();
-        }
+        // A barrier after the question/echo detects pending output failures
+        // before accepting the answer, including a hidden prompt's newline.
+        writeOutput(hidden ? '\n' : '', () => finish(undefined, answer));
       });
     } catch {
       onError();

@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Preserve the recovery key after failed or interrupted master key rotation. Backups are created exclusively, and all updates are blocked while a backup remains. Rotation errors identify the failed persistence stage, including cleanup after successful key/data saves. Document full-store verification before manual recovery and backup removal.
+
 ## [0.5.1] - 2026-11-03
 
 ### Fixed

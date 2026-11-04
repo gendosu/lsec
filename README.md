@@ -323,7 +323,7 @@ The storage location is fixed at `~/.config/local-secret/`, relative to `os.home
 | --- | --- | --- |
 | `master.key` | `~/.config/local-secret/master.key` | 32 random bytes (`crypto.randomBytes(32)`). File permissions are `0o600`, directory permissions are `0o700`. Generated automatically on first access. |
 | `secrets.json` | `~/.config/local-secret/secrets.json` | `0o600`. Written atomically by writing to a `.tmp` file and then `rename`-ing it. |
-| `master.key.bak` | `~/.config/local-secret/master.key.bak` | A backup of the pre-rotation `master.key`, present only temporarily while `rotate-key` is running. Automatically removed on successful completion (see "Rotating master.key" for details). |
+| `master.key.bak` | `~/.config/local-secret/master.key.bak` | A recovery backup of the pre-rotation key, created exclusively with mode `0o600`. Removed on successful rotation; if it remains, updates are blocked until recovery is verified (see "Rotating master.key"). |
 
 The structure of `secrets.json`:
 
@@ -350,14 +350,40 @@ Key names and namespace names are stored in plaintext; **only the values** are e
 
 `lsec rotate-key` (or, on the library side, `SecretStore#rotateMasterKey()` / `rotateMasterKey()`) generates a new `master.key` and re-encrypts every value in `global` and all `namespace`s with the new key.
 
-- **All-or-nothing**: Decryption under the current key is fully completed in memory before anything is written. If even one value fails to decrypt (e.g., a corrupted `master.key`), a `CryptoError` is thrown and the operation aborts — neither `master.key` nor `secrets.json` on disk is modified.
-- **Write order (crash resilience)**: (1) copy the current `master.key` to `master.key.bak` → (2) atomically write the new key to `master.key` (via rename) → (3) atomically write the re-encrypted `secrets.json` → (4) delete `master.key.bak` on success. Because full atomicity across two files isn't achievable, if the process crashes between steps (2) and (3), you can end up with `master.key` already replaced by the new key while `secrets.json` is still encrypted under the old key. If that happens, **restore the old key by copying `master.key.bak` over `master.key`**. Once restored, the existing `secrets.json` can be decrypted normally again, and you can re-run `rotate-key`.
+- **Before persistence**: All values are decrypted and re-encrypted in memory first. A decryption failure raises `CryptoError` without changing the key, data, or backup.
+- **Persistence order**: (1) exclusively create `master.key.bak` from the valid current key → (2) replace `master.key` by rename → (3) replace `secrets.json` by rename → (4) remove the backup. These two file replacements are not one transaction. A failure between (2) and (3) leaves old data requiring the backup key. A failure after (3), including backup removal failure, leaves new data requiring the current key. Cleanup failure raises `StoreError` explicitly stating that the new key and data were saved.
+- **Recovery pending**: Any remaining `master.key.bak` path (including an invalid file, directory, or dangling symlink) blocks `set`, `delete`, `deleteNamespace`, and `rotateMasterKey` with `StoreError`, including deletion of missing entries. This applies to existing instances, new instances, and subsequent CLI processes. The backup is never overwritten on retry. Reads use the current on-disk key while recovery is pending; they do not fall back to the backup or a cached old key, and a missing current key is not regenerated. `has`, `list`, and `namespaces` remain available. There is no automatic rollback or backup deletion on failure.
+
+For manual recovery after a failed or interrupted rotation:
+
+1. Stop **all processes** using the store. Preserve private copies of `master.key`, `secrets.json`, and `master.key.bak` wherever present before changing anything. Keep these originals separate from the working copies used below; retain file permissions (`0o600` for keys/data, `0o700` for directories).
+2. In an **isolated copy**, verify that the current `master.key` is 32 bytes and decrypts **every value in global and every namespace**. The example below performs this check without printing plaintext. If all values decrypt, keep that key: rotation may have completed and only cleanup failed. One successful `get` is insufficient.
+3. Only if the current key cannot decrypt all values, test a separate isolated copy with the valid 32-byte backup copied to its `master.key`. Verify every value again. If neither key decrypts all values, preserve all files and investigate; do not overwrite the live key or remove the backup. An empty store cannot identify a key generation by decryption, so retain a valid current key when one exists.
+4. Restore the verified matching key/data pair, preserving the original copies. Verify every value again at the actual store path while all other processes remain stopped. Only then explicitly remove `master.key.bak` from that store and resume updates or `rotate-key`.
+
+Example verification, run from a project with the npm package `lsec` installed (set `RECOVERY_DIR` to the isolated copy, or to the restored store for the final verification):
 
 ```bash
-# Example recovery steps (if the process crashes during rotate-key)
-cp ~/.config/local-secret/master.key.bak ~/.config/local-secret/master.key
-lsec get some_key   # confirm it decrypts with the old key
-lsec rotate-key     # run the rotation again
+RECOVERY_DIR=/absolute/path/to/isolated-copy node --input-type=module <<'JS'
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { SecretStore } from 'lsec';
+
+const configDir = process.env.RECOVERY_DIR;
+if (readFileSync(join(configDir, 'master.key')).length !== 32) {
+  throw new Error('A valid existing 32-byte master.key is required.');
+}
+const store = new SecretStore({ configDir });
+let count = 0;
+for (const key of store.list()) { store.get(key); count++; }
+for (const namespace of store.namespaces()) {
+  for (const key of store.list({ namespace })) {
+    store.get(key, { namespace });
+    count++;
+  }
+}
+console.log(`Verified all ${count} stored values; no plaintext printed.`);
+JS
 ```
 
 ## `run`: inject secrets as environment variables only for the duration of a command (equivalent to `op run`)

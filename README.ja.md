@@ -323,7 +323,7 @@ const env = resolveEnv({
 | --- | --- | --- |
 | `master.key` | `~/.config/local-secret/master.key` | 32 バイトの乱数（`crypto.randomBytes(32)`）。ファイルは `0o600`、ディレクトリは `0o700`。初回アクセス時に自動生成される。 |
 | `secrets.json` | `~/.config/local-secret/secrets.json` | `0o600`。`.tmp` ファイルへ書き込んで `rename` する原子的書き込み。 |
-| `master.key.bak` | `~/.config/local-secret/master.key.bak` | `rotate-key` 実行中のみ一時的に存在する、ローテーション前の `master.key` のバックアップ。正常終了時は自動削除される（詳細は「master.key のローテーション」を参照）。 |
+| `master.key.bak` | `~/.config/local-secret/master.key.bak` | ローテーション前の鍵の復旧用バックアップ。`0o600` で排他的に新規作成し、正常終了時に削除する。残存時は復旧確認が終わるまで更新を拒否する（「master.key のローテーション」を参照）。 |
 
 `secrets.json` の構造:
 
@@ -350,14 +350,40 @@ key 名・namespace 名は平文で保存され、**値のみ**が AES-256-GCM �
 
 `lsec rotate-key`（ライブラリ側は `SecretStore#rotateMasterKey()` / `rotateMasterKey()`）で、新しい `master.key` を生成し、`global` と全 `namespace` の値をすべて新しい鍵で再暗号化できます。
 
-- **all-or-nothing**: 現行鍵での復号は書き込み前にすべてメモリ上で完了させます。1件でも復号に失敗した場合（`master.key` の破損など）は `CryptoError` を投げて中断し、ディスク上の `master.key` / `secrets.json` は一切変更されません。
-- **書き込み順序（クラッシュ耐性）**: (1) 現行 `master.key` を `master.key.bak` としてコピー → (2) 新しい鍵を `master.key` に原子的に書き込み（rename） → (3) 再暗号化済みの `secrets.json` を原子的に書き込み → (4) 成功したら `master.key.bak` を削除。2つのファイルにまたがる完全な原子性は実現できないため、(2) と (3) の間でプロセスがクラッシュした場合、`master.key` は新しい鍵に置き換わっているのに `secrets.json` はまだ旧鍵で暗号化されたまま、という状態が起こり得ます。この場合は **`master.key.bak` を `master.key` に上書きコピーして旧鍵を復元してください**。復元後は既存の `secrets.json` を通常どおり復号でき、`rotate-key` を再実行できます。
+- **永続化前の中断**: 全値の復号と再暗号化を先にメモリ上で完了させます。復号に失敗すると `CryptoError` を投げ、鍵・データ・バックアップを変更せず中断します。
+- **永続化の順序**: (1) 有効な現行鍵から `master.key.bak` を排他的に新規作成 → (2) rename で `master.key` を置換 → (3) rename で `secrets.json` を置換 → (4) バックアップを削除。2ファイルの置換は単一トランザクションではありません。(2) と (3) の間の失敗では旧データにバックアップ鍵が必要です。(3) の後の失敗（バックアップ削除失敗を含む）では新データに現行鍵が必要です。削除失敗時は新鍵とデータの保存が完了したことを明示する `StoreError` を投げます。
+- **復旧待ち**: `master.key.bak` のパスが残っている間は、不正なファイル・ディレクトリ・リンク切れの symlink も含め、`set`・`delete`・`deleteNamespace`・`rotateMasterKey` を `StoreError` で拒否します。未登録項目の削除、同一・新規インスタンス、次の CLI プロセスも対象です。再試行でバックアップを上書きしません。復旧待ち中の読み取りはディスク上の現行鍵を使い、バックアップや古いキャッシュへフォールバックせず、現行鍵が欠落していても新しく生成しません。`has`・`list`・`namespaces` は利用できます。失敗時の自動ロールバックや自動バックアップ削除は行いません。
+
+ローテーションの失敗・中断後に手動復旧する場合:
+
+1. ストアを使う**すべてのプロセスを停止**します。変更前に `master.key`・`secrets.json`・`master.key.bak` の存在するものを非公開の場所へ保全コピーします。以下の検証用コピーとは別に原本を残し、権限（鍵・データは `0o600`、ディレクトリは `0o700`）を維持します。
+2. **隔離コピー上で**現行 `master.key` が32バイトであることと、**global と全 namespace の全値**を復号できることを確認します。下の例は平文を出力せず検証します。全値を復号できたら、その鍵を維持します。保存が完了し、後始末だけ失敗した可能性があるためです。1件の `get` 成功だけでは不十分です。
+3. 現行鍵で全値を復号できない場合に限り、別の隔離コピーで有効な32バイトのバックアップを `master.key` にコピーして、再度全値を検証します。どちらの鍵でも全値を復号できなければ、すべてのファイルを保全して調査し、実ストアの鍵の上書きやバックアップの削除を行わないでください。空ストアは復号で鍵の世代を識別できないため、有効な現行鍵がある場合は維持します。
+4. 原本の保全コピーを残したまま、検証済みの正しい鍵とデータの組み合わせを復元します。他のプロセスを停止した状態で実ストアの全値を再確認し、**確認後にだけ `master.key.bak` を明示的に削除**して、更新や `rotate-key` を再開します。
+
+検証例（npm パッケージ `lsec` をインストールしたプロジェクトで実行し、`RECOVERY_DIR` に隔離コピーの絶対パス、最終確認時は復元したストアのパスを指定）:
 
 ```bash
-# 復旧手順の例（rotate-key 実行中にクラッシュした場合）
-cp ~/.config/local-secret/master.key.bak ~/.config/local-secret/master.key
-lsec get some_key   # 旧鍵で復号できることを確認
-lsec rotate-key     # 改めてローテーションを実行
+RECOVERY_DIR=/absolute/path/to/isolated-copy node --input-type=module <<'JS'
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { SecretStore } from 'lsec';
+
+const configDir = process.env.RECOVERY_DIR;
+if (readFileSync(join(configDir, 'master.key')).length !== 32) {
+  throw new Error('A valid existing 32-byte master.key is required.');
+}
+const store = new SecretStore({ configDir });
+let count = 0;
+for (const key of store.list()) { store.get(key); count++; }
+for (const namespace of store.namespaces()) {
+  for (const key of store.list({ namespace })) {
+    store.get(key, { namespace });
+    count++;
+  }
+}
+console.log(`Verified all ${count} stored values; no plaintext printed.`);
+JS
 ```
 
 ## `run`: コマンド実行中だけシークレットを環境変数として注入する（`op run` 相当）

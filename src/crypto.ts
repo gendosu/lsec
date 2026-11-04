@@ -16,6 +16,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { CryptoError, StoreError } from './errors.js';
 import { ensureConfigDir } from './paths.js';
+import { writeFileAtomic } from './atomic-file.js';
 
 /** AES-256 key size in bytes. */
 export const KEY_BYTES = 32;
@@ -79,7 +80,7 @@ export function loadOrCreateMasterKey(configDir: string): Buffer {
   assertNoMasterKeyBackup(configDir);
   ensureConfigDir(configDir);
   const key = crypto.randomBytes(KEY_BYTES);
-  fs.writeFileSync(keyPath, key, { mode: 0o600 });
+  writeMasterKeyAtomic(configDir, key);
   return key;
 }
 
@@ -128,23 +129,12 @@ export function generateMasterKey(): Buffer {
 }
 
 /**
- * Atomically replaces `<configDir>/master.key` with `key` (tmp file +
- * rename), with mode 0o600. Unlike {@link loadOrCreateMasterKey}'s initial
- * write, this is used to swap an *existing* key, so it must never leave a
- * torn or partially-written key file on disk for a reader to observe.
+ * Publishes a complete key by private, exclusive temporary-file creation
+ * and rename, both on first creation and replacement. The caller holds
+ * the store lock across key selection and the corresponding data operation.
  */
 export function writeMasterKeyAtomic(configDir: string, key: Buffer): void {
-  ensureConfigDir(configDir);
-  const keyPath = path.join(configDir, MASTER_KEY_FILE_NAME);
-  const tmpPath = `${keyPath}.tmp`;
-  try {
-    fs.unlinkSync(tmpPath);
-  } catch {
-    // ignore: tmpPath did not exist (the common case)
-  }
-  fs.writeFileSync(tmpPath, key, { mode: 0o600 });
-  fs.chmodSync(tmpPath, 0o600);
-  fs.renameSync(tmpPath, keyPath);
+  writeFileAtomic(path.join(configDir, MASTER_KEY_FILE_NAME), key);
 }
 
 /**

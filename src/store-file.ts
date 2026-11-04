@@ -20,6 +20,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { StoreError } from './errors.js';
+import { writeFileAtomic } from './atomic-file.js';
 import type { StoreData } from './types.js';
 
 const STORE_FILE_NAME = 'secrets.json';
@@ -143,49 +144,13 @@ export function readStoreFile(configDir: string): StoreData {
   return validateStoreData(parsed, secretsPath);
 }
 
-/**
- * Atomically writes `data` to `<configDir>/secrets.json`.
- *
- * Creates `configDir` (mode 0o700) if it does not exist yet, writes to a
- * `<secretsPath>.tmp` file with mode 0o600, then renames it over the target
- * path so readers never observe a partially written file.
- *
- * Any pre-existing `.tmp` file is removed before writing the new one.
- * `writeFileSync`'s `mode` option is only honored by the OS when it creates
- * the file (POSIX `open(O_CREAT, mode)`); if a stale `.tmp` file with looser
- * permissions were left over from a previous failed write and reused as-is,
- * its permissions would not be reset by `mode` alone, leaving a transient
- * window where the plaintext secrets JSON is more widely readable than
- * 0o600. Removing it first guarantees every `.tmp` file is newly created, so
- * its permissions are exactly 0o600 from the first byte written, with no
- * such window. `chmodSync` is applied afterwards as well, as a defense in
- * depth measure.
- *
- * Throws {@link StoreError} if the write or rename fails; on failure, any
- * `.tmp` file that was created is removed on a best-effort basis.
- */
+/** Writes a private, exclusively created temporary file and renames it over the target. */
 export function writeStoreFile(configDir: string, data: StoreData): void {
-  fs.mkdirSync(configDir, { recursive: true, mode: 0o700 });
-
   const secretsPath = path.join(configDir, STORE_FILE_NAME);
-  const tmpPath = `${secretsPath}.tmp`;
-
   try {
-    try {
-      fs.unlinkSync(tmpPath);
-    } catch {
-      // ignore: tmpPath did not exist (the common case)
-    }
-    fs.writeFileSync(tmpPath, JSON.stringify(data, null, 2), { mode: 0o600 });
-    fs.chmodSync(tmpPath, 0o600);
-    fs.renameSync(tmpPath, secretsPath);
-  } catch (err: unknown) {
-    try {
-      fs.unlinkSync(tmpPath);
-    } catch {
-      // best-effort cleanup; ignore failures (e.g. tmpPath was never created)
-    }
-    const msg = err instanceof Error ? err.message : String(err);
-    throw new StoreError(`Failed to write secrets.json at ${secretsPath}: ${msg}`, { cause: err });
+    writeFileAtomic(secretsPath, JSON.stringify(data, null, 2));
+  } catch (cause) {
+    const msg = cause instanceof Error ? cause.message : String(cause);
+    throw new StoreError(`Failed to write secrets.json at ${secretsPath}: ${msg}`, { cause });
   }
 }

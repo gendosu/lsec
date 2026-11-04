@@ -23,6 +23,7 @@ import type { CryptoError } from './errors.js';
 import { SecretNotFoundError, StoreError } from './errors.js';
 import { resolveConfigDir, type ResolveConfigDirOptions } from './paths.js';
 import { readStoreFile, writeStoreFile } from './store-file.js';
+import { withStoreLock } from './store-lock.js';
 import type { StoreData } from './types.js';
 
 /** Options accepted by {@link SecretStore}'s constructor. */
@@ -80,23 +81,25 @@ export class SecretStore {
 
   /** Encrypts `value` and stores it under `key`, overwriting any previous value. */
   set(key: string, value: string, opts?: SecretOpts): void {
-    this.assertWritable();
-    const data = readStoreFile(this.configDir);
-    const encrypted = encrypt(value, this.getMasterKey());
-    const namespace = opts?.namespace;
-    if (!namespace) {
-      data.global[key] = encrypted;
-    } else {
-      // Must be null-prototype (not a `{}` literal): a plain object's
-      // inherited `__proto__` setter would silently swallow `key ===
-      // "__proto__"` (a string value assigned to it is a no-op), and
-      // `getContainer`'s safety guarantee above depends on every container
-      // reachable from `data.namespaces` being null-prototype.
-      const container = data.namespaces[namespace] ?? (Object.create(null) as Record<string, string>);
-      container[key] = encrypted;
-      data.namespaces[namespace] = container;
-    }
-    writeStoreFile(this.configDir, data);
+    return withStoreLock(this.configDir, () => {
+      this.assertWritable();
+      const data = readStoreFile(this.configDir);
+      const encrypted = encrypt(value, this.getMasterKey());
+      const namespace = opts?.namespace;
+      if (!namespace) {
+        data.global[key] = encrypted;
+      } else {
+        // Must be null-prototype (not a `{}` literal): a plain object's
+        // inherited `__proto__` setter would silently swallow `key ===
+        // "__proto__"` (a string value assigned to it is a no-op), and
+        // `getContainer`'s safety guarantee above depends on every container
+        // reachable from `data.namespaces` being null-prototype.
+        const container = data.namespaces[namespace] ?? (Object.create(null) as Record<string, string>);
+        container[key] = encrypted;
+        data.namespaces[namespace] = container;
+      }
+      writeStoreFile(this.configDir, data);
+    });
   }
 
   /** Returns the decrypted value stored under `key`. Throws {@link SecretNotFoundError} if it is not registered. */
@@ -112,44 +115,54 @@ export class SecretStore {
 
   /** Like {@link SecretStore.get}, but returns `undefined` instead of throwing when `key` is not registered. */
   tryGet(key: string, opts?: SecretOpts): string | undefined {
-    const data = readStoreFile(this.configDir);
-    const encrypted = this.getContainer(data, opts?.namespace)?.[key];
-    if (encrypted === undefined) {
-      return undefined;
-    }
-    return decrypt(encrypted, this.getMasterKey());
+    return withStoreLock(this.configDir, () => {
+      const data = readStoreFile(this.configDir);
+      const encrypted = this.getContainer(data, opts?.namespace)?.[key];
+      if (encrypted === undefined) {
+        return undefined;
+      }
+      return decrypt(encrypted, this.getMasterKey());
+    });
   }
 
   /** Returns whether `key` is registered. */
   has(key: string, opts?: SecretOpts): boolean {
-    const data = readStoreFile(this.configDir);
-    return this.getContainer(data, opts?.namespace)?.[key] !== undefined;
+    return withStoreLock(this.configDir, () => {
+      const data = readStoreFile(this.configDir);
+      return this.getContainer(data, opts?.namespace)?.[key] !== undefined;
+    });
   }
 
   /** Removes `key` if it is registered, returning whether it was removed. */
   delete(key: string, opts?: SecretOpts): boolean {
-    this.assertWritable();
-    const data = readStoreFile(this.configDir);
-    const container = this.getContainer(data, opts?.namespace);
-    if (container?.[key] === undefined) {
-      return false;
-    }
-    delete container[key];
-    writeStoreFile(this.configDir, data);
-    return true;
+    return withStoreLock(this.configDir, () => {
+      this.assertWritable();
+      const data = readStoreFile(this.configDir);
+      const container = this.getContainer(data, opts?.namespace);
+      if (container?.[key] === undefined) {
+        return false;
+      }
+      delete container[key];
+      writeStoreFile(this.configDir, data);
+      return true;
+    });
   }
 
   /** Returns the registered key names in the given namespace (or `global` if omitted). */
   list(opts?: SecretOpts): string[] {
-    const data = readStoreFile(this.configDir);
-    const container = this.getContainer(data, opts?.namespace);
-    return container ? Object.keys(container) : [];
+    return withStoreLock(this.configDir, () => {
+      const data = readStoreFile(this.configDir);
+      const container = this.getContainer(data, opts?.namespace);
+      return container ? Object.keys(container) : [];
+    });
   }
 
   /** Returns the names of all namespaces that have been used at least once. */
   namespaces(): string[] {
-    const data = readStoreFile(this.configDir);
-    return Object.keys(data.namespaces);
+    return withStoreLock(this.configDir, () => {
+      const data = readStoreFile(this.configDir);
+      return Object.keys(data.namespaces);
+    });
   }
 
   /**
@@ -158,14 +171,16 @@ export class SecretStore {
    * way to bulk-delete `global` through this method.
    */
   deleteNamespace(namespace: string): boolean {
-    this.assertWritable();
-    const data = readStoreFile(this.configDir);
-    if (!Object.prototype.hasOwnProperty.call(data.namespaces, namespace)) {
-      return false;
-    }
-    delete data.namespaces[namespace];
-    writeStoreFile(this.configDir, data);
-    return true;
+    return withStoreLock(this.configDir, () => {
+      this.assertWritable();
+      const data = readStoreFile(this.configDir);
+      if (!Object.prototype.hasOwnProperty.call(data.namespaces, namespace)) {
+        return false;
+      }
+      delete data.namespaces[namespace];
+      writeStoreFile(this.configDir, data);
+      return true;
+    });
   }
 
   /**
@@ -188,56 +203,58 @@ export class SecretStore {
    * the matching key before removing it (see README recovery steps).
    */
   rotateMasterKey(): number {
-    this.assertWritable();
-    const data = readStoreFile(this.configDir);
-    const currentKey = this.getMasterKey();
-    const newKey = generateMasterKey();
+    return withStoreLock(this.configDir, () => {
+      this.assertWritable();
+      const data = readStoreFile(this.configDir);
+      const currentKey = this.getMasterKey();
+      const newKey = generateMasterKey();
 
-    let reencryptedCount = 0;
-    // Both accumulators must be null-prototype for the same reason `set`'s
-    // new-container path is (see its comment above): a plain `{}` here
-    // would silently drop a `key === "__proto__"` entry (string values
-    // assigned to `__proto__` are a no-op) or a `namespace === "__proto__"`
-    // entry (an object value assigned to `__proto__` replaces the
-    // accumulator's actual prototype instead of becoming an own,
-    // JSON-serializable property) when re-encrypting.
-    const reencryptContainer = (container: Record<string, string>): Record<string, string> => {
-      const reencrypted = Object.create(null) as Record<string, string>;
-      for (const [key, encrypted] of Object.entries(container)) {
-        reencrypted[key] = encrypt(decrypt(encrypted, currentKey), newKey);
-        reencryptedCount++;
+      let reencryptedCount = 0;
+      // Both accumulators must be null-prototype for the same reason `set`'s
+      // new-container path is (see its comment above): a plain `{}` here
+      // would silently drop a `key === "__proto__"` entry (string values
+      // assigned to `__proto__` are a no-op) or a `namespace === "__proto__"`
+      // entry (an object value assigned to `__proto__` replaces the
+      // accumulator's actual prototype instead of becoming an own,
+      // JSON-serializable property) when re-encrypting.
+      const reencryptContainer = (container: Record<string, string>): Record<string, string> => {
+        const reencrypted = Object.create(null) as Record<string, string>;
+        for (const [key, encrypted] of Object.entries(container)) {
+          reencrypted[key] = encrypt(decrypt(encrypted, currentKey), newKey);
+          reencryptedCount++;
+        }
+        return reencrypted;
+      };
+
+      const newGlobal = reencryptContainer(data.global);
+      const newNamespaces = Object.create(null) as Record<string, Record<string, string>>;
+      for (const [namespace, container] of Object.entries(data.namespaces)) {
+        newNamespaces[namespace] = reencryptContainer(container);
       }
-      return reencrypted;
-    };
+      const newData: StoreData = { version: 1, global: newGlobal, namespaces: newNamespaces };
 
-    const newGlobal = reencryptContainer(data.global);
-    const newNamespaces = Object.create(null) as Record<string, Record<string, string>>;
-    for (const [namespace, container] of Object.entries(data.namespaces)) {
-      newNamespaces[namespace] = reencryptContainer(container);
-    }
-    const newData: StoreData = { version: 1, global: newGlobal, namespaces: newNamespaces };
+      let stage = 'backup creation';
+      try {
+        backupMasterKey(this.configDir);
+        stage = 'master.key replacement';
+        writeMasterKeyAtomic(this.configDir, newKey);
+        stage = 'secrets.json persistence';
+        writeStoreFile(this.configDir, newData);
+        stage = 'backup cleanup';
+        removeMasterKeyBackup(this.configDir);
+      } catch (cause) {
+        const saved = stage === 'backup cleanup'
+          ? 'The new master.key and secrets.json were saved; backup cleanup failed. '
+          : '';
+        throw new StoreError(
+          `Rotation failed during ${stage} at ${this.configDir}. ${saved}` +
+          'Preserve master.key, secrets.json and any master.key.bak; recovery verification is required ' +
+          'before removing the backup or retrying updates (see README recovery steps).',
+          { cause }
+        );
+      }
 
-    let stage = 'backup creation';
-    try {
-      backupMasterKey(this.configDir);
-      stage = 'master.key replacement';
-      writeMasterKeyAtomic(this.configDir, newKey);
-      stage = 'secrets.json persistence';
-      writeStoreFile(this.configDir, newData);
-      stage = 'backup cleanup';
-      removeMasterKeyBackup(this.configDir);
-    } catch (cause) {
-      const saved = stage === 'backup cleanup'
-        ? 'The new master.key and secrets.json were saved; backup cleanup failed. '
-        : '';
-      throw new StoreError(
-        `Rotation failed during ${stage} at ${this.configDir}. ${saved}` +
-        'Preserve master.key, secrets.json and any master.key.bak; recovery verification is required ' +
-        'before removing the backup or retrying updates (see README recovery steps).',
-        { cause }
-      );
-    }
-
-    return reencryptedCount;
+      return reencryptedCount;
+    });
   }
 }

@@ -218,7 +218,7 @@ describe('writeMasterKeyAtomic', () => {
 
     writeMasterKeyAtomic(configDir, generateMasterKey());
 
-    expect(fs.existsSync(path.join(configDir, 'master.key.tmp'))).toBe(false);
+    expect(fs.readdirSync(configDir).some((name) => name.endsWith('.tmp'))).toBe(false);
   });
 });
 

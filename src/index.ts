@@ -20,8 +20,9 @@
  * Finally, it re-exports the pure-logic building blocks behind `lsec run`
  * (the CLI's `op run`-equivalent secret injection command): reference
  * parsing (`isSecretRef` / `parseSecretRef`), the minimal `.env` parser
- * (`parseEnvFile`), and the env-map resolver (`resolveEnv`). src/cli.ts only
- * imports this module and ./prompt.js (never secret-store.ts / crypto.ts /
+ * (`parseEnvFile`), and env-map resolution and validation (`resolveEnv` /
+ * `validateRunEnv`). src/cli.ts only
+ * imports this module and CLI helpers (never secret-store.ts / crypto.ts /
  * store-file.ts / paths.ts / secret-ref.ts / env-file.ts / run-env.ts
  * directly), so these are re-exported here for that command to use.
  */
@@ -35,7 +36,7 @@ export { formatSecretRef, isSecretRef, parseSecretRef } from './secret-ref.js';
 export type { SecretRef } from './secret-ref.js';
 export { parseEnvFile } from './env-file.js';
 export type { EnvFileEntry } from './env-file.js';
-export { resolveEnv } from './run-env.js';
+export { resolveEnv, validateRunEnv } from './run-env.js';
 export type { ResolveEnvOptions } from './run-env.js';
 
 /**

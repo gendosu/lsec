@@ -47,6 +47,13 @@ describe('constructor', () => {
 });
 
 describe('set / get', () => {
+  it('round-trips strings containing NUL bytes without applying environment-variable constraints', () => {
+    const { store, configDir } = makeStore();
+    const value = 'DUMMY_PRIVATE_PREFIX\0DUMMY_PRIVATE_SUFFIX';
+    store.set('token', value);
+    expect(new SecretStore({ configDir }).get('token')).toBe(value);
+  });
+
   it('round-trips a value in the global namespace (namespace omitted)', () => {
     const { store } = makeStore();
 

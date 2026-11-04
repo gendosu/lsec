@@ -449,9 +449,17 @@ PLAIN_VALUE=not-a-secret
 lsec run --dotenv .env -- npm run dev
 ```
 
-### When resolution fails
+### When resolution or startup fails
 
 A reference to a nonexistent namespace/key, a malformed reference (one that doesn't match the `lsec://<namespace>/<key>` shape), a nonexistent `--dotenv` path, or malformed `.env` content are all detected before the command is launched; an error is printed to stderr and the process exits with 1 (the child process never runs). Secret values are never included in error messages.
+
+Stored values are general strings: `SecretStore.set` / `get` can round-trip strings containing NUL (`\0`) bytes. Environment-variable injection has stricter requirements. After resolving references and applying all `--dotenv` overrides, `run` rejects NUL-containing or non-string values before launching the child, prints only the variable name and problem type, and exits with 1. This also applies to literal values in `.env` files. For example:
+
+```text
+Error: Invalid value for environment variable "TOKEN": NUL bytes are not allowed.
+```
+
+If process startup fails, `run` exits with 1 and prints a fixed diagnostic, without exposing the runtime's original error or resolved values. Known causes include command not found (`ENOENT`), permission denied (`EACCES`), oversized arguments or environment (`E2BIG`), and invalid process arguments or environment (`ERR_INVALID_ARG_VALUE`). Other startup failures receive a generic diagnostic.
 
 The child process's exit code or signal propagates directly as `lsec run`'s own exit code (if terminated by a signal, it's `128 + signal number`).
 
